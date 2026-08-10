@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VIGIL — watches</title>
+  <link rel="stylesheet" href="ui.css" />
+  <style>
+    body { max-width: 880px; margin: 0 auto; padding: 32px 20px 90px; }
+    header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+    .lede { color: var(--muted); max-width: 58ch; margin: 0 0 24px; }
+    .step { margin-bottom: 16px; }
+    .step > h2 {
+      font-family: var(--mono); font-size: 10px; letter-spacing: .16em;
+      text-transform: uppercase; color: var(--muted); font-weight: 500;
+      margin: 0 0 10px; display: flex; align-items: center; gap: 8px;
+    }
+    .step > h2::before {
+      content: attr(data-n); color: var(--signal);
+      border: 1px solid var(--signal-dim); border-radius: 3px;
+      padding: 1px 5px; font-size: 9px;
+    }
+    #profile { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r);
+      background: linear-gradient(90deg, #221c10, var(--panel) 60%); border: 1px solid var(--signal-dim); margin-bottom: 16px; }
+    #profile .flagdot { width: 9px; height: 9px; border-radius: 50%; background: var(--signal); flex: none; }
+    #profile .pname { font-weight: 600; }
+    #profile .pmeta { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+    .cap { padding: 9px 10px; border: 1px solid var(--edge); border-radius: var(--r); cursor: pointer; margin-bottom: 6px; background: var(--panel); }
+    .cap:hover { border-color: var(--signal); }
+    .cap.sel { border-color: var(--signal); background: #23282e; }
+    .cap .u { font-family: var(--mono); font-size: 11px; word-break: break-all; }
+    .cap .m { font-size: 11px; color: var(--muted); margin-top: 3px; }
+    table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+    th { text-align: left; color: var(--muted); font-weight: 500; font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; padding: 6px 8px; border-bottom: 1px solid var(--edge); }
+    td { padding: 5px 8px; border-bottom: 1px solid #222a35; }
+    .ok { color: var(--open); } .no { color: var(--muted); }
+    .rulebox { border: 1px solid var(--edge); border-radius: var(--r); padding: 10px; margin-bottom: 8px; background: var(--panel); }
+    .wlist .watch { display: flex; gap: 10px; align-items: center; padding: 11px 0; border-top: 1px solid var(--edge); }
+    #banner { padding: 10px 12px; border-radius: var(--r); margin-bottom: 16px; display: none; }
+    #banner.err { background: #2a1c1b; border: 1px solid #573733; color: #eaa8a1; display: block; }
+    #banner.good { background: #1d2620; border: 1px solid #33513f; color: #9ed8b6; display: block; }
+    #geoNote { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+    .fmtgrid { display: flex; flex-wrap: wrap; gap: 6px; }
+    .fmtgrid label { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--edge);
+      border-radius: 999px; padding: 4px 10px; font-size: 11px; cursor: pointer; background: var(--panel); }
+    .fmtgrid label:has(input:checked) { border-color: var(--signal); color: var(--signal); }
+    .fmtgrid input { width: auto; }
+    hr { border: none; border-top: 1px solid var(--edge); margin: 32px 0; }
+  </style>
+</head>
+<body>
+  <header><h1 class="wordmark">VIGIL</h1><span class="muted">watch builder</span></header>
+  <p class="lede">
+    Open a seat map, a size selector or a listing page. VIGIL recognises the site, fills in the
+    local conventions, and watches the page load its own data — then replays that on a schedule.
+  </p>
+
+  <div id="banner"></div>
+  <div id="profile" hidden></div>
+
+  <div class="step panel">
+    <h2 data-n="1">Record the page</h2>
+    <p class="muted" style="margin-top:0">
+      Pick the tab, start recording, then reload that page or click through to the seats. Stop once the data is on screen.
+    </p>
+    <div class="row">
+      <select id="tabs" style="flex:1"></select>
+      <button id="rec" class="primary">Start recording</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+  </div>
+
+  <div class="step panel">
+    <h2 data-n="2">Pick the request holding the data</h2>
+    <div id="caps"><div class="empty">Nothing captured yet.</div></div>
+  </div>
+
+  <div class="step panel">
+    <h2 data-n="3">Check the map</h2>
+    <div id="mapping"><div class="empty">Pick a request first.</div></div>
+  </div>
+
+  <div class="step panel">
+    <h2 data-n="4">Say what's worth an alert</h2>
+    <div id="rules" class="stack"></div>
+    <div class="row" style="margin-top:10px">
+      <select id="ruleType" style="flex:1">
+        <option value="seat_block">Adjacent seats open up</option>
+        <option value="restock">Back in stock</option>
+        <option value="new_item">New listing or showtime appears</option>
+        <option value="format_added">A specific format is added (IMAX, 70mm…)</option>
+        <option value="price_below">Price falls below a number</option>
+        <option value="price_drop">Price drops vs its median</option>
+      </select>
+      <button id="addRule">Add rule</button>
+    </div>
+  </div>
+
+  <div class="step panel">
+    <h2 data-n="5">Name and save</h2>
+    <div class="grid3">
+      <label><span class="lab">Name</span><input id="name" placeholder="Odyssey · IMAX 70mm Sat" /></label>
+      <label><span class="lab">Check every (min)</span><input id="interval" type="number" min="1" value="5" /></label>
+      <label><span class="lab">Open on click</span><input id="openUrl" placeholder="booking page URL" /></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="save" class="primary">Save watch</button>
+      <button id="test">Test now</button>
+      <button id="exportT" class="ghost right">Export as template</button>
+    </div>
+  </div>
+
+  <hr />
+  <p class="eyebrow">Saved watches</p>
+  <div id="wlist" class="wlist"></div>
+
+  <hr />
+  <p class="eyebrow">Settings</p>
+  <div class="panel grid3">
+    <label><span class="lab">Default interval (min)</span><input id="sInterval" type="number" min="1" /></label>
+    <label><span class="lab">Quiet hours from</span><input id="sFrom" type="number" min="0" max="23" /></label>
+    <label><span class="lab">Quiet hours to</span><input id="sTo" type="number" min="0" max="23" /></label>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <label class="row" style="gap:6px"><input id="sQuiet" type="checkbox" style="width:auto" /> <span>Hold alerts during quiet hours</span></label>
+    <label class="row" style="gap:6px"><input id="sSound" type="checkbox" style="width:auto" /> <span>Play a tone on urgent hits</span></label>
+  </div>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

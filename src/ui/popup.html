@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="ui.css" />
+  <style>
+    body { width: 380px; padding: 14px; }
+    header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    #sweep { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+    .watch { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-top: 1px solid var(--edge); }
+    .watch:first-of-type { border-top: none; }
+    .watch .nm { font-weight: 500; }
+    .watch .st { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--open); }
+    .dot.err { background: var(--bad); }
+    .dot.off { background: var(--taken); }
+    section { margin-bottom: 14px; }
+    footer { display: flex; gap: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div id="pulse" class="pulse off"></div>
+    <h1 class="wordmark">VIGIL</h1>
+    <button id="arm" class="right primary">Arm</button>
+  </header>
+
+  <section>
+    <p class="eyebrow">Watching</p>
+    <div id="watchers"></div>
+    <p id="sweep"></p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Recent hits</p>
+    <div id="hits" class="stack"></div>
+  </section>
+
+  <footer>
+    <button id="new" class="primary">New watch</button>
+    <button id="opts" class="ghost">Manage</button>
+    <button id="clear" class="ghost right">Clear</button>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

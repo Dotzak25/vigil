@@ -1,0 +1,9 @@
+{
+  "name": "vigil",
+  "private": true,
+  "type": "module",
+  "description": "Core-logic test suite for the VIGIL extension (src/core, src/catalog) — dependency-free, runs under plain Node.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}
