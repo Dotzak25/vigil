@@ -125,8 +125,12 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
  * rest: bearer tokens, API keys, session ids in the query string, and the
  * user's own booking/order identifiers.
  */
-const SECRET_HEADER = /auth|token|key|secret|session|cookie|bearer|signature|csrf|api[-_]?k/i;
-const SECRET_PARAM = /token|session|sid|auth|key|signature|uid|user|customer|order|basket|cart|email/i;
+// Exported so anything else that has to make the same "is this safe to ship
+// in a public feed?" call — the build-feed script's validator, in
+// particular — checks against the exact same patterns instead of a
+// second, driftable copy.
+export const SECRET_HEADER = /auth|token|key|secret|session|cookie|bearer|signature|csrf|api[-_]?k/i;
+export const SECRET_PARAM = /token|session|sid|auth|key|signature|uid|user|customer|order|basket|cart|email/i;
 
 export function toTemplate(watcher, profile) {
   const url = new URL(watcher.request.url);

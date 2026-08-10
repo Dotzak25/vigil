@@ -595,8 +595,22 @@ $('test').addEventListener('click', async () => {
 $('exportT').addEventListener('click', async () => {
   if (!state.capture) return say('Record and pick a request first.', 'err');
   const t = toTemplate(buildWatcher(), state.profile);
-  await navigator.clipboard.writeText(JSON.stringify(t, null, 2));
-  say('Template copied to clipboard — no cookies, tokens or account ids in it.');
+  const json = JSON.stringify(t, null, 2);
+  await navigator.clipboard.writeText(json);
+
+  // Also hand back an actual file, named the way templates/README.md asks
+  // contributors to name it — copy alone leaves "now what do I do with this"
+  // as an open question; a correctly-named download answers it.
+  const filename = `${t.chainId || t.host.replace(/[^a-z0-9.-]/gi, '_')}.json`;
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  say(`Downloaded ${filename} — no cookies, tokens or account ids in it. Drop it into this project's templates/ folder and open a pull request to add it to the shared feed.`);
 });
 
 /* ---------- saved watches ---------- */
