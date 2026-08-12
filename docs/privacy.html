@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>VIGIL — Privacy Policy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  body { max-width: 680px; margin: 0 auto; padding: 40px 20px 80px; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1b1f24; }
+  h1 { font-size: 1.6em; margin-bottom: 0.2em; }
+  h2 { font-size: 1.1em; margin-top: 2em; }
+  .eff { color: #57606a; font-size: 0.9em; }
+  code { background: #f0f2f4; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.9em; }
+  ul { padding-left: 1.3em; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>VIGIL — Privacy Policy</h1>
+<p class="eff">Effective: 2026-08-12</p>
+
+<p>VIGIL is a Chrome extension that watches pages you choose — a cinema seat map, a product page, a resale listing — and tells you when something on it changes. This page describes what data it touches and where it goes.</p>
+
+<h2>There is no server</h2>
+<p>VIGIL has no backend. Nothing you watch, nothing it captures, and nothing it stores is ever sent to us or to any server we operate, because none exists. Everything below happens entirely inside your own browser, using <code>chrome.storage.local</code> — storage private to your device and your Chrome profile.</p>
+
+<h2>What it accesses, and when</h2>
+<ul>
+  <li><strong>Nothing, by default.</strong> VIGIL requests no site access at install. It requests access to a specific site only when you choose to record a watch on that site, using Chrome's own per-site permission prompt.</li>
+  <li><strong>While recording</strong>, it observes the network requests the page you're on makes to itself (its own <code>fetch</code>/<code>XHR</code> calls) — never requests to other sites, and it never blocks, delays, or modifies anything the page does.</li>
+  <li><strong>While a watch is armed</strong>, it periodically re-issues the one specific request you captured, to check whether the result has changed, using your existing logged-in session on that site.</li>
+</ul>
+
+<h2>Cookies</h2>
+<p>VIGIL never stores your cookies. It replays a captured request with <code>credentials: 'include'</code>, which means Chrome itself attaches whatever cookies are already in your browser's own cookie jar at the moment of the request — VIGIL never reads, copies, or persists them anywhere.</p>
+
+<h2>What's stored on your device</h2>
+<ul>
+  <li>Your configured watches (which site, which rule, how often)</li>
+  <li>The last-seen state of each watch, so it can tell you what <em>changed</em></li>
+  <li>A short rolling price history, used only to detect a genuine price drop rather than daily noise</li>
+  <li>A log of past alerts, capped in size</li>
+</ul>
+<p>None of this leaves your device. Uninstalling the extension removes all of it.</p>
+
+<h2>If you export or contribute a template</h2>
+<p>VIGIL can export the "shape" of a site's request — which endpoint, which fields — so other users don't have to record it themselves. Before that file is created, VIGIL strips anything that could identify you: bearer tokens, API keys, and any session, order, customer, cart, or user identifier in the URL or headers. You choose whether to share that file; VIGIL never does this automatically.</p>
+
+<h2>The shared template feed</h2>
+<p>To pre-fill setup for popular sites, VIGIL periodically fetches a small public JSON file listing known site request-shapes, hosted at <code>dotzak25.github.io/vigil</code>. This fetch contains no information about you or what you're watching — it's a plain, anonymous request for a static catalogue file, the same for every user.</p>
+
+<h2>What VIGIL does not do</h2>
+<ul>
+  <li>No analytics, telemetry, or tracking of any kind</li>
+  <li>No advertising, and no data sold or shared with any third party</li>
+  <li>No automated purchasing — VIGIL watches and notifies, it never buys anything or acts on your behalf</li>
+  <li>No accounts — there is nothing to sign up for</li>
+</ul>
+
+<h2>Permissions, plainly</h2>
+<ul>
+  <li><code>storage</code> — save your watches and settings on-device</li>
+  <li><code>alarms</code> — schedule the periodic checks</li>
+  <li><code>notifications</code> — show you an alert when something changes</li>
+  <li><code>tabs</code> — list open tabs so you can pick one to record, and open a result you click on</li>
+  <li><code>scripting</code>, plus a per-site host permission you grant explicitly — inject the observer that watches a recorded page's own network requests, only on sites you've said yes to</li>
+  <li><code>offscreen</code> — play a short alert tone</li>
+</ul>
+
+<h2>Changes</h2>
+<p>If this policy changes, the updated version will be posted at this same URL with a new effective date.</p>
+
+<h2>Contact</h2>
+<p>Questions or concerns: open an issue at <a href="https://github.com/Dotzak25/vigil/issues">github.com/Dotzak25/vigil</a>.</p>
+
+</body>
+</html>
