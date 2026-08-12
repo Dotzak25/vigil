@@ -78,5 +78,5 @@ default, already far more attentive than checking by hand.
 ## Notes for whoever fills the form
 
 - **Privacy policy URL:** `https://dotzak25.github.io/vigil/privacy.html`
-- **Single purpose:** state it as "notify the user when a specific, user-selected page's data changes" — this maps directly to the optional per-site host permission, which the review process checks against the stated purpose.
+- **Single purpose, permission justifications, host permission justification, remote code, and the data-usage/privacy-practices tab:** all drafted verbatim, ready to paste, in `store/review-justifications.md`.
 - Screenshots: see `store/screenshots/`.
