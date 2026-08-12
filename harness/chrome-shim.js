@@ -159,7 +159,14 @@ globalThis.chrome = {
   },
   notifications: { create: (id, opts) => log('notifications.create', id, opts) },
   alarms: { create: (name, opts) => log('alarms.create', name, opts), clear: (name) => log('alarms.clear', name) },
-  permissions: { request: async (p) => { log('permissions.request', p); return true; } },
+  permissions: {
+    // Host permission is now optional + per-site (manifest.json). The
+    // harness always "already has" the site permission — matches what a
+    // real browser looks like right after the user has granted it once —
+    // so the flow can be exercised end-to-end without a real grant dialog.
+    contains: async (p) => { log('permissions.contains', p); return true; },
+    request: async (p) => { log('permissions.request', p); return true; },
+  },
 };
 
 // navigator.clipboard.writeText needs a secure-ish context / permission in a

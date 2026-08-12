@@ -117,9 +117,32 @@ function onTabChange() {
 
 $('tabs').addEventListener('change', onTabChange);
 
+/**
+ * Host permission is optional and per-site now (manifest.json), so nothing
+ * can inject into or fetch from a domain until the user has explicitly said
+ * yes to THIS one. request() only works from a user-gesture handler, which
+ * every call site below already is — a button click.
+ */
+function originPatternOf(url) {
+  const u = new URL(url);
+  return `${u.protocol}//${u.hostname}/*`;
+}
+
+async function ensurePermission(url) {
+  const origin = originPatternOf(url);
+  if (await chrome.permissions.contains({ origins: [origin] })) return true;
+  return chrome.permissions.request({ origins: [origin] });
+}
+
 $('rec').addEventListener('click', async () => {
   const tabId = Number($('tabs').value);
   if (!tabId) return say('Pick a tab first.', 'err');
+
+  const pageUrl = $('tabs').selectedOptions[0]?.dataset.url;
+  if (pageUrl && !(await ensurePermission(pageUrl))) {
+    return say('Permission denied for this site — VIGIL can\'t watch it without access to it.', 'err');
+  }
+
   state.recordingTabId = tabId;
   await chrome.runtime.sendMessage({ type: 'vigil:startRecording', tabId });
   $('rec').disabled = true;
@@ -574,6 +597,13 @@ $('save').addEventListener('click', async () => {
   if (!state.rules.length) return say('Add at least one rule.', 'err');
   if (!$('name').value.trim()) return say('Give the watch a name.', 'err');
 
+  // The replay target can be a different host than the page itself (the
+  // seat map's API often lives on api.* while the page is on www.*) — the
+  // scheduler needs its own permission to fetch that host in the background.
+  if (!(await ensurePermission(state.capture.url))) {
+    return say('Permission denied for the request VIGIL needs to replay — this watch can\'t run without it.', 'err');
+  }
+
   const w = buildWatcher();
   await Store.saveWatcher(w);
   say(`Saved “${w.name}”. Arm VIGIL from the toolbar to start checking.`);
@@ -582,6 +612,9 @@ $('save').addEventListener('click', async () => {
 
 $('test').addEventListener('click', async () => {
   if (!state.capture) return say('Record and pick a request first.', 'err');
+  if (!(await ensurePermission(state.capture.url))) {
+    return say('Permission denied for this request.', 'err');
+  }
   const res = await chrome.runtime.sendMessage({
     type: 'vigil:testRequest',
     request: { url: state.capture.url, method: state.capture.method,

@@ -22,12 +22,48 @@ const TEMPLATE_FEED_TTL_MS = 12 * 60 * 60 * 1000; // 12h — this is a slow-movi
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.alarms.create(TICK, { periodInMinutes: 1, delayInMinutes: 0.1 });
   await refreshBadge();
+  await syncContentScripts();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await chrome.alarms.create(TICK, { periodInMinutes: 1, delayInMinutes: 0.1 });
   await refreshBadge();
+  await syncContentScripts();
 });
+
+/**
+ * The recorder/bridge content scripts used to be declared statically in
+ * manifest.json against <all_urls> — the single most likely Chrome Web
+ * Store rejection reason for a monitoring extension. Host permission is now
+ * optional and requested per-site, at the moment a watch is recorded
+ * (options.js), so there's nothing to inject anywhere until the user has
+ * actually granted that specific site. This keeps the two content scripts'
+ * registered `matches` in sync with whatever's currently granted — firing on
+ * every permission change (including a manual revoke in chrome://extensions)
+ * and once on startup, since dynamic registrations need re-establishing
+ * after a full browser restart.
+ */
+async function syncContentScripts() {
+  const { origins = [] } = await chrome.permissions.getAll();
+  const existingIds = new Set((await chrome.scripting.getRegisteredContentScripts()).map((s) => s.id));
+
+  if (!origins.length) {
+    if (existingIds.size) await chrome.scripting.unregisterContentScripts();
+    return;
+  }
+
+  const specs = [
+    { id: 'vigil-recorder', matches: origins, js: ['src/content/recorder.js'], runAt: 'document_start', world: 'MAIN', allFrames: false },
+    { id: 'vigil-bridge', matches: origins, js: ['src/content/bridge.js'], runAt: 'document_start', world: 'ISOLATED', allFrames: false },
+  ];
+  const toRegister = specs.filter((s) => !existingIds.has(s.id));
+  const toUpdate = specs.filter((s) => existingIds.has(s.id));
+  if (toRegister.length) await chrome.scripting.registerContentScripts(toRegister);
+  if (toUpdate.length) await chrome.scripting.updateContentScripts(toUpdate);
+}
+
+chrome.permissions.onAdded.addListener(syncContentScripts);
+chrome.permissions.onRemoved.addListener(syncContentScripts);
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== TICK) return;

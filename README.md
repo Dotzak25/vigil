@@ -209,8 +209,6 @@ Core logic is dependency-free ES modules that run under plain Node — the seat,
 
 ## Before the Chrome Web Store
 
-One thing decides the review, so do it first:
+**Done:** `host_permissions: ["<all_urls>"]` is gone. Host access is `optional_host_permissions`, requested per-site — once when a watch is recorded (for the page itself) and once more if the request VIGIL needs to replay lives on a different host (an API on `api.*` while the page is on `www.*`, which is common). Content scripts are registered dynamically (`chrome.scripting.registerContentScripts`) for whatever's currently granted, kept in sync via `chrome.permissions.onAdded`/`onRemoved` — there's nothing injected anywhere the user hasn't explicitly said yes to. `activeTab` and the static `web_accessible_resources` entry were both unused and are gone too.
 
-**Swap `host_permissions: ["<all_urls>"]` for `optional_host_permissions`,** requesting access per-site at the moment a watch is recorded. A monitoring extension asking for blanket access to every site is the most likely rejection, and per-site grants are a better story for users anyway. The record flow already knows which tab it's targeting, so it can call `chrome.permissions.request()` right there.
-
-Also needed: a privacy policy stating captured data never leaves the device (currently true — there is no server), popup screenshots, and a listing that leads with *notify*, not *scrape*.
+Still needed before submitting: a privacy policy stating captured data never leaves the device (currently true — there is no server), store listing screenshots, and listing copy that leads with *notify*, not *scrape*.
