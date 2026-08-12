@@ -18,23 +18,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     recording = !!msg.recording;
     sendResponse({ ok: true });
   }
-  if (msg?.type === 'vigil:readDom') {
-    try {
-      const nodes = [...document.querySelectorAll(msg.selector)].slice(0, 500);
-      sendResponse({
-        ok: true,
-        html: nodes.map((n) => n.outerHTML.slice(0, 2000)),
-        text: nodes.map((n) => n.innerText.trim().slice(0, 400)),
-      });
-    } catch (e) {
-      sendResponse({ ok: false, error: String(e) });
-    }
-  }
   return true;
 });
 
 window.addEventListener('message', (ev) => {
+  // Defense in depth: recorder.js only ever posts to this exact document at
+  // this exact origin (window.postMessage(data, window.location.origin)).
+  // ev.source narrows to "this window, not an embedded iframe" but says
+  // nothing about origin on its own — check both before trusting anything
+  // claiming to be a capture.
   if (ev.source !== window) return;
+  if (ev.origin !== location.origin) return;
   if (ev.data?.source !== '__VIGIL_CAPTURE__') return;
   if (!recording) return;
 

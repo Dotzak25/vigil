@@ -316,23 +316,41 @@ async function getTemplates(force = false) {
 
 /* ---------- messages ---------- */
 
-const recordingTabs = new Set();
+// Which tab is currently recording. This file's whole design is "nothing
+// lives in module scope, because the worker is killed after ~30s idle" —
+// a plain Set here would violate that: if the worker is evicted mid-recording
+// (a real possibility between "start" and the user actually reloading the
+// page), it comes back with an empty Set and silently stops collecting
+// captures with no error. chrome.storage.session survives a worker restart
+// within the same browser session and clears itself on browser close —
+// exactly the lifetime "recording" should have.
+async function getRecordingTabs() {
+  const { recordingTabs } = await chrome.storage.session.get('recordingTabs');
+  return new Set(recordingTabs || []);
+}
+async function setRecordingTabs(set) {
+  await chrome.storage.session.set({ recordingTabs: [...set] });
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     switch (msg?.type) {
       case 'vigil:isRecording':
-        return sendResponse({ recording: recordingTabs.has(sender.tab?.id) });
+        return sendResponse({ recording: (await getRecordingTabs()).has(sender.tab?.id) });
 
       case 'vigil:startRecording': {
-        recordingTabs.add(msg.tabId);
+        const tabs = await getRecordingTabs();
+        tabs.add(msg.tabId);
+        await setRecordingTabs(tabs);
         await Store.clearCaptures();
         await chrome.tabs.sendMessage(msg.tabId, { type: 'vigil:setRecording', recording: true }).catch(() => {});
         return sendResponse({ ok: true });
       }
 
       case 'vigil:stopRecording': {
-        recordingTabs.delete(msg.tabId);
+        const tabs = await getRecordingTabs();
+        tabs.delete(msg.tabId);
+        await setRecordingTabs(tabs);
         await chrome.tabs.sendMessage(msg.tabId, { type: 'vigil:setRecording', recording: false }).catch(() => {});
         return sendResponse({ ok: true, captures: await Store.captures() });
       }
