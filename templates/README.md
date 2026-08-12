@@ -22,14 +22,27 @@ Before merging, sanity-check that the file has no stray identifiers beyond
 what `toTemplate()` already strips (`src/core/registry.js`) — the export
 strips known patterns, not everything anyone could ever put in a URL.
 
-## Building the feed
+## Building and deploying the feed
 
 `npm run build-feed` reads every `*.json` file in this folder, validates it,
 and writes the merged feed to `dist/templates.json` — the exact shape
-`fetchTemplatePack()` in `src/core/registry.js` expects. That one file is what
-gets deployed to `TEMPLATE_FEED`'s URL (currently a placeholder — wherever
-this project ends up actually hosting it: GitHub Pages, Cloudflare Pages,
-Netlify, all work fine, since it's just static JSON, no server logic).
+`fetchTemplatePack()` in `src/core/registry.js` expects.
+
+The live feed is `TEMPLATE_FEED` in `src/core/registry.js`, served by GitHub
+Pages from this repo's `docs/` folder (Settings → Pages → Deploy from a
+branch → `main` / `/docs`). Until this is wired to CI, publishing an update
+after merging a contribution is a manual step:
+
+```
+npm run build-feed && cp dist/templates.json docs/templates.json
+git add docs/templates.json && git commit -m "Update template feed" && git push
+```
+
+(A GitHub Actions workflow that does this automatically on every push to
+`templates/` was the original plan — it needs the `workflow` OAuth scope on
+whoever's pushing, which wasn't available when this was set up. Worth
+revisiting once that's sorted, so a merged PR goes live without a manual
+step.)
 
 Malformed files are skipped with a warning, not a hard failure — one bad
 contribution shouldn't be able to take the whole feed down.

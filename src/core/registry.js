@@ -228,7 +228,7 @@ export function templateKey(template) {
  * accounts, no per-user state — so v1 stays a pure client-side product while
  * still getting same-day fixes when a chain changes its API.
  */
-export const TEMPLATE_FEED = 'https://vigil-templates.pages.dev/v1/templates.json';
+export const TEMPLATE_FEED = 'https://dotzak25.github.io/vigil/templates.json';
 
 export async function fetchTemplatePack(url = TEMPLATE_FEED) {
   const res = await fetch(url, { cache: 'no-store' });
