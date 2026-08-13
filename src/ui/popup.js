@@ -2,6 +2,21 @@ import { Store } from '../core/store.js';
 
 const $ = (id) => document.getElementById(id);
 
+/**
+ * Every sendMessage call below used to have no catch at all. render() is the
+ * only thing that ever un-disables a button or updates state, so a rejected
+ * message (service worker unreachable, port closed mid-call — both real,
+ * ordinary occurrences) left a button permanently stuck disabled with
+ * whatever text was set right before the await, no error shown anywhere,
+ * since this popup previously had no error surface at all.
+ */
+function showError(msg) {
+  const el = $('popupErr');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 5000);
+}
+
 function ago(t) {
   const s = Math.round((Date.now() - t) / 1000);
   if (s < 60) return `${s}s ago`;
@@ -81,8 +96,16 @@ async function render() {
     run.addEventListener('click', async () => {
       run.disabled = true;
       run.textContent = '…';
-      await chrome.runtime.sendMessage({ type: 'vigil:runNow', id: w.id });
-      render();
+      try {
+        await chrome.runtime.sendMessage({ type: 'vigil:runNow', id: w.id });
+      } catch (e) {
+        showError(`Couldn't check "${w.name}": ${e?.message || e}`);
+      } finally {
+        // render() rebuilds this exact button from scratch, so it always
+        // ends up back in a normal, clickable state regardless of whether
+        // the message above succeeded.
+        render();
+      }
     });
 
     el.append(dot, mid, run);
@@ -155,7 +178,16 @@ async function render() {
 $('arm').addEventListener('click', async () => {
   const s = await Store.settings();
   await Store.saveSettings({ armed: !s.armed });
-  await chrome.runtime.sendMessage({ type: 'vigil:refreshBadge' });
+  try {
+    await chrome.runtime.sendMessage({ type: 'vigil:refreshBadge' });
+  } catch (e) {
+    // The setting itself is already saved and correct at this point — only
+    // the toolbar badge failed to refresh, so this must not block render()
+    // below. It used to: an await before render() meant a failure here left
+    // the button reading "Arm" while the extension was actually armed
+    // (or vice versa), and clicking again would then silently flip it back.
+    showError(`Armed, but the toolbar badge may be stale: ${e?.message || e}`);
+  }
   render();
 });
 
@@ -171,6 +203,8 @@ $('opts').addEventListener('click', () => {
 });
 
 $('clear').addEventListener('click', async () => {
+  // Wiped up to 200 events with no confirmation and no undo.
+  if (!confirm('Clear all recent hits? This can\'t be undone.')) return;
   await Store.clearEvents();
   render();
 });

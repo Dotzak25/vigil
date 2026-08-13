@@ -61,6 +61,34 @@ const SEED_CAPTURE = {
 const RECORDING_TAB = { id: 1, title: 'CineStar Berlin — Sitzplan', url: PAGE_URL };
 const OTHER_TAB = { id: 2, title: 'New Tab', url: 'chrome://newtab/' };
 
+// A second, unrelated synthetic site (a sneaker drop, matches markets.js's
+// nike.com entry -> kind 'drop' -> default rules restock+new_item) — used
+// to test that recording a genuinely different site in the same options.html
+// session doesn't leak the first site's rules/geometry/capture (the
+// regression this session's audit found in applyProfile/renderCaptures).
+const SECOND_PAGE_URL = 'https://www.nike.com/launch/some-drop';
+const SECOND_PAYLOAD = {
+  product: {
+    sizes: [
+      { id: 'US-8', label: 'US 8', available: false, price: 150 },
+      { id: 'US-9', label: 'US 9', available: false, price: 150 },
+      { id: 'US-10', label: 'US 10', available: true, price: 150 },
+    ],
+  },
+};
+const SECOND_CAPTURE = {
+  url: 'https://www.nike.com/api/launch/inventory',
+  method: 'GET',
+  headers: { accept: 'application/json' },
+  requestBody: null,
+  pageUrl: SECOND_PAGE_URL,
+  title: 'Inventory',
+  body: JSON.stringify(SECOND_PAYLOAD),
+};
+const SECOND_TAB = { id: 3, title: 'Nike SNKRS drop', url: SECOND_PAGE_URL };
+
+let activeRecordingTabId = null;
+
 // A fixture "shared template" for this same synthetic capture — i.e. what
 // the community feed (Phase 3 of the README) would contain if someone had
 // already recorded this exact site. This is NOT a claim about a real
@@ -97,11 +125,21 @@ async function handleMessage(msg) {
   log('runtime.sendMessage', msg);
   switch (msg?.type) {
     case 'vigil:startRecording':
+      activeRecordingTabId = msg.tabId;
       return { ok: true };
-    case 'vigil:stopRecording':
-      return { captures: [SEED_CAPTURE] };
+    case 'vigil:stopRecording': {
+      const captures =
+        activeRecordingTabId === SECOND_TAB.id ? [SECOND_CAPTURE]
+        : activeRecordingTabId === RECORDING_TAB.id ? [SEED_CAPTURE]
+        : [];
+      return { captures };
+    }
     case 'vigil:testRequest':
-      return { ok: true, payload: SEED_PAYLOAD };
+      // Route by which site's request this is, so editWatcher() (which
+      // re-fetches live data via this same message) gets the RIGHT payload
+      // back for whichever saved watcher is being edited, not always the
+      // first site's.
+      return { ok: true, payload: msg.request?.url === SECOND_CAPTURE.url ? SECOND_PAYLOAD : SEED_PAYLOAD };
     case 'vigil:runNow':
       return { ok: true };
     case 'vigil:refreshBadge':
@@ -145,12 +183,13 @@ globalThis.chrome = {
   },
   tabs: {
     async query(filter) {
-      const tabs = [RECORDING_TAB, OTHER_TAB];
+      const tabs = [RECORDING_TAB, SECOND_TAB, OTHER_TAB];
       if (filter?.active && filter?.currentWindow) return [RECORDING_TAB];
       return tabs;
     },
     create: (opts) => log('tabs.create', opts),
     update: (id, opts) => log('tabs.update', id, opts),
+    reload: (id) => log('tabs.reload', id),
     sendMessage: async (id, msg) => { log('tabs.sendMessage', id, msg); return {}; },
   },
   action: {
@@ -168,6 +207,13 @@ globalThis.chrome = {
     request: async (p) => { log('permissions.request', p); return true; },
   },
 };
+
+// window.confirm() blocks on a real native dialog, which would hang an
+// automated test run. Default to "OK" (matches the common real-user path)
+// and log every call so a test can assert a confirm was actually shown.
+const realConfirm = window.confirm.bind(window);
+window.confirm = (msg) => { log('confirm()', msg); return true; };
+window.__realConfirm = realConfirm;
 
 // navigator.clipboard.writeText needs a secure-ish context / permission in a
 // real browser; stub it so the "Export as template" button doesn't throw.

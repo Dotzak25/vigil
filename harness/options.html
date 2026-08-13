@@ -54,7 +54,7 @@
     local conventions, and watches the page load its own data — then replays that on a schedule.
   </p>
 
-  <div id="banner"></div>
+  <div id="banner" role="status" aria-live="polite"></div>
   <div id="profile" hidden></div>
 
   <div class="step panel">
@@ -123,6 +123,18 @@
   <div class="row" style="margin-top:10px">
     <label class="row" style="gap:6px"><input id="sQuiet" type="checkbox" style="width:auto" /> <span>Hold alerts during quiet hours</span></label>
     <label class="row" style="gap:6px"><input id="sSound" type="checkbox" style="width:auto" /> <span>Play a tone on urgent hits</span></label>
+  </div>
+
+  <hr />
+  <p class="eyebrow">Backup</p>
+  <p class="muted" style="margin-top:0">
+    Everything VIGIL knows lives only in this browser profile — nothing syncs anywhere. Back it up before a
+    reinstall or a browser reset, or to move it to another machine.
+  </p>
+  <div class="row">
+    <button id="exportBackup" class="ghost">Export all watches + history</button>
+    <button id="importBackupBtn" class="ghost">Import a backup</button>
+    <input id="importBackup" type="file" accept="application/json" hidden />
   </div>
 
   <!-- TEST HARNESS ONLY: not part of the extension, see chrome-shim.js -->

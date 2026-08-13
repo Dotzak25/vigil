@@ -1,5 +1,5 @@
 import { Store } from '../core/store.js';
-import { findItemArrays, suggestFields, extractItems, pathToString } from '../core/extract.js';
+import { findItemArrays, suggestFields, extractItems, pathToString, parseFieldPath, getPath, suggestAnchor } from '../core/extract.js';
 import { identify, toTemplate, pickTemplate, templateKey, templateHealth } from '../core/registry.js';
 import { describeGeometry, toMinimap } from '../core/seats.js';
 import { formatPrice } from '../core/money.js';
@@ -7,20 +7,52 @@ import { FORMATS, formatLabel } from '../catalog/vocab.js';
 
 const $ = (id) => document.getElementById(id);
 
-const state = {
-  recordingTabId: null,
-  pageUrl: null,
-  profile: null,
-  capture: null,
-  payload: null,
-  candidates: [],
-  spec: { itemsPath: [], fields: {} },
-  geometry: { numbering: 'sequential', rowOrder: 'front-first' },
-  rules: [],
-  templateKey: null,
-  templates: [],
-  templateHealthMap: {},
-};
+function defaultState() {
+  return {
+    recordingTabId: null,
+    pageUrl: null,
+    profile: null,
+    capture: null,
+    payload: null,
+    candidates: [],
+    spec: { itemsPath: [], fields: {} },
+    geometry: { numbering: 'sequential', rowOrder: 'front-first' },
+    rules: [],
+    templateKey: null,
+    allUnreadable: false,
+    // Set while editing an existing saved watcher, so Save updates it in
+    // place (same id -> same snap:/hist: keys, so price history and the
+    // diff baseline survive) instead of creating a new one.
+    editingId: null,
+    editingCreatedAt: null,
+  };
+}
+
+const state = { ...defaultState(), templates: [], templateHealthMap: {} };
+
+/**
+ * Clears everything about the CURRENT builder session, without touching the
+ * template feed cache. This didn't exist before: after saving one watch, the
+ * builder held onto its capture/spec/rules/geometry indefinitely. Recording
+ * a second, different site in the same tab session could then either (a)
+ * silently save a duplicate of the FIRST watch if the second site's capture
+ * list came back empty — state.capture/spec never got replaced — or (b)
+ * save the second watch with the first's leftover rules, most dangerously
+ * state.rules, which is only ever replaced by applyProfile() when it's
+ * currently EMPTY. A cinema's seat_block rule surviving into a sneaker
+ * watch means that watch is saved, looks healthy, and can never fire.
+ */
+function resetBuilderState() {
+  Object.assign(state, defaultState());
+
+  $('name').value = '';
+  $('interval').value = '5';
+  $('openUrl').value = '';
+  $('profile').hidden = true;
+  $('caps').innerHTML = '<div class="empty">Nothing captured yet.</div>';
+  $('mapping').innerHTML = '<div class="empty">Pick a request first.</div>';
+  renderRules();
+}
 
 /**
  * Load whatever's in the shared template feed (cached in the background,
@@ -34,18 +66,49 @@ async function loadTemplates() {
   state.templateHealthMap = res?.health || {};
 }
 
+// A generation token so an earlier "good" message's auto-clear timer can't
+// wipe out a LATER message. Without this: Save succeeds (good banner, timer
+// armed for 4.5s) -> user changes something and Saves again within that
+// window but hits a validation error -> at 4.5s the FIRST timer fires and
+// clears the banner (which has `display:none` in its base CSS rule) a
+// fraction of a second after the error appeared, so the error is
+// effectively invisible.
+let bannerGen = 0;
+
 function say(msg, kind = 'good') {
+  const gen = ++bannerGen;
   const b = $('banner');
   b.className = kind;
   b.textContent = msg;
-  if (kind === 'good') setTimeout(() => (b.className = ''), 4500);
+  if (kind === 'good') {
+    setTimeout(() => {
+      if (bannerGen === gen) b.className = '';
+    }, 4500);
+  }
 }
 
 const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]);
 
+const hostnameOf = (url) => { try { return new URL(url).hostname; } catch { return null; } };
+
 /* ---------- profile ---------- */
 
 function applyProfile(url) {
+  // A genuinely different site being recorded now must not inherit rules or
+  // geometry left over from whatever was recorded before in this same
+  // builder session. This used to only reset when state.rules happened to
+  // already be empty (the `!state.rules.length` guard below) — recording
+  // cinema A (seat_block), then switching the tab dropdown to retail site B
+  // without saving A first, left seat_block in place because it was never
+  // empty. Site B could then be saved with a rule that can never fire
+  // against a payload with no row/col data, silently.
+  const prevHost = state.pageUrl ? hostnameOf(state.pageUrl) : null;
+  const newHost = hostnameOf(url);
+  if (prevHost && newHost && prevHost !== newHost) {
+    state.rules = [];
+    state.geometry = { numbering: 'sequential', rowOrder: 'front-first' };
+  }
+
   state.pageUrl = url;
   const p = identify(url);
   state.profile = p;
@@ -128,10 +191,16 @@ function originPatternOf(url) {
   return `${u.protocol}//${u.hostname}/*`;
 }
 
-async function ensurePermission(url) {
+/** @returns {Promise<{granted: boolean, wasAlreadyGranted: boolean}>} */
+async function ensurePermissionDetailed(url) {
   const origin = originPatternOf(url);
-  if (await chrome.permissions.contains({ origins: [origin] })) return true;
-  return chrome.permissions.request({ origins: [origin] });
+  if (await chrome.permissions.contains({ origins: [origin] })) return { granted: true, wasAlreadyGranted: true };
+  const granted = await chrome.permissions.request({ origins: [origin] });
+  return { granted, wasAlreadyGranted: false };
+}
+
+async function ensurePermission(url) {
+  return (await ensurePermissionDetailed(url)).granted;
 }
 
 $('rec').addEventListener('click', async () => {
@@ -139,23 +208,55 @@ $('rec').addEventListener('click', async () => {
   if (!tabId) return say('Pick a tab first.', 'err');
 
   const pageUrl = $('tabs').selectedOptions[0]?.dataset.url;
-  if (pageUrl && !(await ensurePermission(pageUrl))) {
-    return say('Permission denied for this site — VIGIL can\'t watch it without access to it.', 'err');
-  }
-
-  state.recordingTabId = tabId;
-  await chrome.runtime.sendMessage({ type: 'vigil:startRecording', tabId });
+  // Disabled BEFORE any await, not after — otherwise a fast double-click
+  // sends two vigil:startRecording messages before either await resolves,
+  // each of which wipes the shared capture buffer via Store.clearCaptures().
   $('rec').disabled = true;
-  $('stop').disabled = false;
-  say('Recording. Switch to that tab, load the seats or the product, then come back and stop.');
-  chrome.tabs.update(tabId, { active: true });
+  try {
+    let justGranted = false;
+    if (pageUrl) {
+      const { granted, wasAlreadyGranted } = await ensurePermissionDetailed(pageUrl);
+      if (!granted) return say('Permission denied for this site — VIGIL can\'t watch it without access to it.', 'err');
+      justGranted = !wasAlreadyGranted;
+    }
+
+    state.recordingTabId = tabId;
+    await chrome.runtime.sendMessage({ type: 'vigil:startRecording', tabId });
+    $('stop').disabled = false;
+
+    if (justGranted) {
+      // Permission was JUST granted, meaning the content script was only
+      // just registered for this origin — the already-loaded page never
+      // had it injected, so its own fetch/XHR calls (already fired before
+      // now, or about to fire without ever being observed) would go
+      // unrecorded. A first-time recording could silently capture nothing
+      // at all, with no error, unless the user happened to also manually
+      // reload. Force it explicitly instead of just activating the tab.
+      say('Permission granted — reloading that tab so recording actually attaches, then watch for the data to load.');
+      await chrome.tabs.reload(tabId);
+      await chrome.tabs.update(tabId, { active: true });
+    } else {
+      say('Recording. Switch to that tab, reload the seats or the product, then come back and stop.');
+      await chrome.tabs.update(tabId, { active: true });
+    }
+  } catch (e) {
+    $('stop').disabled = true;
+    say(`Couldn't start recording: ${e?.message || e}`, 'err');
+  } finally {
+    $('rec').disabled = false;
+  }
 });
 
 $('stop').addEventListener('click', async () => {
-  const res = await chrome.runtime.sendMessage({ type: 'vigil:stopRecording', tabId: state.recordingTabId });
-  $('rec').disabled = false;
   $('stop').disabled = true;
-  renderCaptures(res?.captures || []);
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'vigil:stopRecording', tabId: state.recordingTabId });
+    renderCaptures(res?.captures || []);
+  } catch (e) {
+    say(`Couldn't stop recording cleanly: ${e?.message || e} — try again, or reload this page.`, 'err');
+  } finally {
+    $('rec').disabled = false;
+  }
 });
 
 /* ---------- step 2: rank and pick ---------- */
@@ -163,6 +264,22 @@ $('stop').addEventListener('click', async () => {
 function renderCaptures(caps) {
   const box = $('caps');
   box.textContent = '';
+
+  // Clear whatever the PREVIOUS pick left in state, unconditionally, before
+  // deciding what this new capture list means. Without this: recording a
+  // server-rendered site (which captures 0 JSON responses) after already
+  // having picked a capture for an earlier site in the same tab session left
+  // state.capture pointing at the EARLIER site's request — the empty-state
+  // message below was shown, but Save's only guard is `if (!state.capture)`,
+  // which was still satisfied by the stale value. The result was a watch
+  // that silently polls the wrong site under the name the user gave the one
+  // they thought they were setting up.
+  state.capture = null;
+  state.payload = null;
+  state.candidates = [];
+  state.spec = { itemsPath: [], fields: {} };
+  state.templateKey = null;
+  $('mapping').innerHTML = '<div class="empty">Pick a request first.</div>';
 
   const scored = caps
     .map((c) => {
@@ -214,13 +331,23 @@ function renderCaptures(caps) {
   for (const s of scored) {
     const el = document.createElement('div');
     el.className = 'cap';
+    // Plain clickable divs with no tabindex/role/keydown handler were
+    // completely unreachable by keyboard — a keyboard-only user could not
+    // complete step 2 of the wizard at all (Apply template's real <button>
+    // was the only reachable control, and only when a template matched).
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
     const top = s.cands[0];
     el.innerHTML = `<div class="u">${esc(s.cap.method)} ${esc(s.cap.url.slice(0, 130))}</div>
       <div class="m">${top ? `${top.length} items at ${esc(pathToString(top.path))} · ${esc(top.tags.join(', ')) || 'no strong signals'}` : 'no list-shaped data'}</div>`;
-    el.addEventListener('click', () => {
+    const pick = () => {
       [...box.children].forEach((c) => c.classList.remove('sel'));
       el.classList.add('sel');
       chooseCapture(s);
+    };
+    el.addEventListener('click', pick);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
     });
     box.appendChild(el);
   }
@@ -255,6 +382,13 @@ function chooseCapture(s, template = null) {
     };
   }
 
+  // A numeric segment in itemsPath (findItemArrays picks up array indices,
+  // e.g. "today's 6th screening") silently drifts to a different item once
+  // the underlying list reorders — always computed fresh against THIS
+  // capture's own payload, never trusted from a shared template (which may
+  // have been recorded against a differently-ordered list).
+  state.spec.itemsAnchor = suggestAnchor(state.payload, state.spec.itemsPath);
+
   if (!$('name').value) $('name').value = (s.cap.title || state.profile?.name || 'Watch').slice(0, 60);
   if (!$('openUrl').value) $('openUrl').value = s.cap.pageUrl || '';
   renderMapping();
@@ -283,17 +417,54 @@ function renderMapping() {
     o.textContent = `${pathToString(c.path)} — ${c.length} items (${c.keys.slice(0, 5).join(', ')})`;
     sel.appendChild(o);
   });
+  // Without this, picking candidate #3 correctly updated the field grid and
+  // preview for #3, but the dropdown itself snapped back to displaying #0
+  // on the very next render (a plain <select> with no explicit .value
+  // defaults to its first option) — every reasonable reading of that is
+  // "my selection didn't take".
+  const currentIndex = state.candidates.findIndex((c) => pathToString(c.path) === pathToString(state.spec.itemsPath));
+  sel.value = currentIndex >= 0 ? String(currentIndex) : '0';
   sel.addEventListener('change', () => {
     const c = state.candidates[Number(sel.value)];
     state.spec.itemsPath = c.path;
     state.spec.fields = suggestFields(c.sample);
+    state.spec.itemsAnchor = suggestAnchor(state.payload, c.path);
     renderMapping();
   });
   pathLabel.appendChild(sel);
   box.appendChild(pathLabel);
 
+  // Manual fallback: findItemArrays only walks the first 4 elements of any
+  // array and stops at depth 8, and never looks inside a 2D grid's outer
+  // array at all — real payload shapes exist where none of the auto-found
+  // candidates is the right one, and until now there was no way to tell
+  // VIGIL "no, it's actually here" short of it being auto-discovered.
+  const manualLabel = document.createElement('label');
+  manualLabel.style.cssText = 'display:block;margin-top:10px';
+  manualLabel.innerHTML = '<span class="lab">Or type the path manually, if the list above missed it</span>';
+  const manualInput = document.createElement('input');
+  manualInput.placeholder = 'e.g. data.attributes.layout.rows.0.seats';
+  manualInput.value = currentIndex === -1 && state.spec.itemsPath?.length ? pathToString(state.spec.itemsPath) : '';
+  manualInput.addEventListener('change', () => {
+    const path = parseFieldPath(manualInput.value) || [];
+    const resolved = getPath(state.payload, path);
+    if (!Array.isArray(resolved) || !resolved.length) {
+      say('That path doesn\'t resolve to a non-empty list in the captured response.', 'err');
+      return;
+    }
+    const sample = resolved.find((x) => x && typeof x === 'object') || {};
+    state.spec.itemsPath = path;
+    state.spec.fields = suggestFields(sample);
+    state.spec.itemsAnchor = suggestAnchor(state.payload, path);
+    renderMapping();
+  });
+  manualLabel.appendChild(manualInput);
+  box.appendChild(manualLabel);
+
   const cand = state.candidates.find((c) => pathToString(c.path) === pathToString(state.spec.itemsPath));
-  const keys = cand?.keys || [];
+  const keys = cand?.keys || (Array.isArray(getPath(state.payload, state.spec.itemsPath))
+    ? Object.keys(getPath(state.payload, state.spec.itemsPath).find((x) => x && typeof x === 'object') || {})
+    : []);
 
   const grid = document.createElement('div');
   grid.className = 'grid3';
@@ -427,7 +598,14 @@ function renderPreview() {
   table.appendChild(tb);
   box.appendChild(table);
 
-  if (items.length && unknown === items.length) {
+  // Tracked on state (not just shown here) so the Save handler can refuse
+  // to save a watch that's already provably incapable of ever firing —
+  // previously this was a warning only, and a watch whose availability
+  // field maps to nothing saved cleanly, reported a healthy itemCount
+  // forever, and never once spoke.
+  state.allUnreadable = items.length > 0 && unknown === items.length;
+
+  if (state.allUnreadable) {
     const warn = document.createElement('p');
     warn.style.color = 'var(--bad)';
     warn.textContent =
@@ -569,7 +747,7 @@ function renderRules() {
 
 function buildWatcher() {
   return {
-    id: crypto.randomUUID(),
+    id: state.editingId || crypto.randomUUID(),
     name: $('name').value.trim(),
     enabled: true,
     intervalMin: Math.max(1, Number($('interval').value) || 5),
@@ -588,7 +766,7 @@ function buildWatcher() {
     rules: state.rules,
     templateKey: state.templateKey || null,
     nextRunAt: Date.now(),
-    createdAt: Date.now(),
+    createdAt: state.editingId ? (state.editingCreatedAt || Date.now()) : Date.now(),
   };
 }
 
@@ -596,44 +774,73 @@ $('save').addEventListener('click', async () => {
   if (!state.capture) return say('Record and pick a request first.', 'err');
   if (!state.rules.length) return say('Add at least one rule.', 'err');
   if (!$('name').value.trim()) return say('Give the watch a name.', 'err');
-
-  // The replay target can be a different host than the page itself (the
-  // seat map's API often lives on api.* while the page is on www.*) — the
-  // scheduler needs its own permission to fetch that host in the background.
-  if (!(await ensurePermission(state.capture.url))) {
-    return say('Permission denied for the request VIGIL needs to replay — this watch can\'t run without it.', 'err');
+  if (state.allUnreadable) {
+    return say('Availability is unreadable for every item, so this watch could never fire. Fix the availability field mapping first.', 'err');
   }
 
-  const w = buildWatcher();
-  await Store.saveWatcher(w);
-  say(`Saved “${w.name}”. Arm VIGIL from the toolbar to start checking.`);
-  renderWatchers();
+  // Disabled before any await — a rapid double-click otherwise enters this
+  // handler twice; buildWatcher() mints a fresh UUID each time (unless
+  // editing), Store.saveWatcher's read-modify-write on the shared watchers
+  // map means the two writes can race, and either way the user sees two
+  // "Saved" banners for what looks like one click.
+  $('save').disabled = true;
+  try {
+    // The replay target can be a different host than the page itself (the
+    // seat map's API often lives on api.* while the page is on www.*) — the
+    // scheduler needs its own permission to fetch that host in the background.
+    if (!(await ensurePermission(state.capture.url))) {
+      return say('Permission denied for the request VIGIL needs to replay — this watch can\'t run without it.', 'err');
+    }
+
+    const w = buildWatcher();
+    await Store.saveWatcher(w);
+    const wasEditing = !!state.editingId;
+    say(wasEditing ? `Updated “${w.name}”.` : `Saved “${w.name}”. Arm VIGIL from the toolbar to start checking.`);
+    resetBuilderState();
+    renderWatchers();
+  } catch (e) {
+    say(`Couldn't save: ${e?.message || e}`, 'err');
+  } finally {
+    $('save').disabled = false;
+  }
 });
 
 $('test').addEventListener('click', async () => {
   if (!state.capture) return say('Record and pick a request first.', 'err');
-  if (!(await ensurePermission(state.capture.url))) {
-    return say('Permission denied for this request.', 'err');
+  $('test').disabled = true;
+  try {
+    if (!(await ensurePermission(state.capture.url))) {
+      return say('Permission denied for this request.', 'err');
+    }
+    const res = await chrome.runtime.sendMessage({
+      type: 'vigil:testRequest',
+      request: { url: state.capture.url, method: state.capture.method,
+        headers: state.capture.headers, requestBody: state.capture.requestBody },
+    });
+    if (!res?.ok) return say(`Replay failed: ${res?.error}`, 'err');
+    const items = extractItems(res.payload, state.spec);
+    say(`Replay worked — ${items.length} items, ${items.filter((i) => i.available === true).length} available right now.`);
+  } catch (e) {
+    say(`Couldn't test: ${e?.message || e}`, 'err');
+  } finally {
+    $('test').disabled = false;
   }
-  const res = await chrome.runtime.sendMessage({
-    type: 'vigil:testRequest',
-    request: { url: state.capture.url, method: state.capture.method,
-      headers: state.capture.headers, requestBody: state.capture.requestBody },
-  });
-  if (!res?.ok) return say(`Replay failed: ${res?.error}`, 'err');
-  const items = extractItems(res.payload, state.spec);
-  say(`Replay worked — ${items.length} items, ${items.filter((i) => i.available === true).length} available right now.`);
 });
 
 $('exportT').addEventListener('click', async () => {
   if (!state.capture) return say('Record and pick a request first.', 'err');
   const t = toTemplate(buildWatcher(), state.profile);
   const json = JSON.stringify(t, null, 2);
-  await navigator.clipboard.writeText(json);
 
-  // Also hand back an actual file, named the way templates/README.md asks
-  // contributors to name it — copy alone leaves "now what do I do with this"
-  // as an open question; a correctly-named download answers it.
+  // Clipboard access can fail for reasons that have nothing to do with the
+  // export itself (document not focused, no clipboardWrite permission
+  // declared) — that used to abort the whole handler before the download
+  // below ever ran, silently. The file is the part that matters; clipboard
+  // is a nicety on top of it.
+  try {
+    await navigator.clipboard.writeText(json);
+  } catch { /* the download below is what actually matters */ }
+
   const filename = `${t.chainId || t.host.replace(/[^a-z0-9.-]/gi, '_')}.json`;
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -645,6 +852,53 @@ $('exportT').addEventListener('click', async () => {
 
   say(`Downloaded ${filename} — no cookies, tokens or account ids in it. Drop it into this project's templates/ folder and open a pull request to add it to the shared feed.`);
 });
+
+/**
+ * Load a saved watcher back into the builder for adjustment. This is the
+ * fix for there being no edit path at all: previously the ONLY way to
+ * change a broken watch's field mapping or rules was Delete + fully
+ * re-record — and Store.deleteWatcher also removes hist:<id>, so the
+ * "keeps failing, re-record it" notification's own advice destroyed
+ * exactly the rolling price history price_drop rules depend on. Keeping
+ * the same id here means snap:<id>/hist:<id> are untouched and the diff
+ * baseline survives.
+ */
+async function editWatcher(w) {
+  say(`Loading current data for “${w.name}”…`);
+  let res;
+  try {
+    res = await chrome.runtime.sendMessage({ type: 'vigil:testRequest', request: w.request });
+  } catch (e) {
+    return say(`Couldn't reach the background to refresh this watch's data: ${e?.message || e}`, 'err');
+  }
+  if (!res?.ok) {
+    return say(`Couldn't refresh this watch's data (${res?.error || 'unreachable'}) — you may need to fully re-record it instead.`, 'err');
+  }
+
+  resetBuilderState();
+  state.editingId = w.id;
+  state.editingCreatedAt = w.createdAt;
+  state.capture = {
+    url: w.request.url, method: w.request.method, headers: w.request.headers,
+    requestBody: w.request.requestBody, pageUrl: w.request.pageUrl, title: w.name,
+  };
+  state.payload = res.payload;
+  state.candidates = findItemArrays(res.payload);
+  state.rules = JSON.parse(JSON.stringify(w.rules || []));
+  state.templateKey = w.templateKey || null;
+  if (w.request.pageUrl) applyProfile(w.request.pageUrl); // won't touch state.rules — already non-empty above
+  state.geometry = { ...w.geometry }; // the watcher's OWN saved geometry wins over the profile's default guess
+  state.spec = JSON.parse(JSON.stringify(w.spec));
+
+  $('name').value = w.name;
+  $('interval').value = w.intervalMin;
+  $('openUrl').value = w.openUrl || '';
+
+  renderMapping();
+  renderRules();
+  say(`Editing “${w.name}”. Adjust anything below, then Save to update it in place.`);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 
 /* ---------- saved watches ---------- */
 
@@ -659,46 +913,154 @@ async function renderWatchers() {
     el.className = 'watch';
     const mid = document.createElement('div');
     mid.style.flex = '1';
+    // w.rules is expected to always exist, but a defensive `?? []` here
+    // costs nothing and means one malformed record can't blank the entire
+    // saved-watch list — the crash previously wasn't even caught anywhere
+    // near here, it just surfaced in the console with nothing rendered.
+    const ruleCount = w.rules?.length ?? 0;
     mid.innerHTML = `<div><strong>${esc(w.name)}</strong> <span class="muted" style="font-size:11px">${esc(w.profile?.name || '')}</span></div>
-      <div class="muted num" style="font-size:11px">every ${w.intervalMin}m · ${w.rules.length} rule(s) · ${w.itemCount ?? '—'} items${
+      <div class="muted num" style="font-size:11px">every ${w.intervalMin}m · ${ruleCount} rule(s) · ${w.itemCount ?? '—'} items${
         w.lastError ? ` · <span style="color:var(--bad)">${esc(w.lastError).slice(0, 60)}</span>` : ''}</div>`;
+
+    const edit = document.createElement('button');
+    edit.className = 'ghost';
+    edit.textContent = 'Edit';
+    edit.addEventListener('click', () => editWatcher(w));
 
     const toggle = document.createElement('button');
     toggle.className = 'ghost';
     toggle.textContent = w.enabled === false ? 'Enable' : 'Pause';
     toggle.addEventListener('click', async () => {
-      await Store.saveWatcher({ ...w, enabled: w.enabled === false });
+      // patchWatcher merges onto a FRESH read rather than this closed-over
+      // `w` (which is only as current as the last renderWatchers() call) —
+      // saveWatcher({...w, enabled}) used to silently roll back
+      // failures/lastError/itemCount/nextRunAt to whatever they were at
+      // last render if a background sweep had updated them since.
+      await Store.patchWatcher(w.id, { enabled: w.enabled === false });
       renderWatchers();
     });
 
     const del = document.createElement('button');
     del.className = 'ghost danger';
     del.textContent = 'Delete';
-    del.addEventListener('click', async () => { await Store.deleteWatcher(w.id); renderWatchers(); });
+    del.addEventListener('click', async () => {
+      // No confirmation existed anywhere in either UI file. Delete sits
+      // directly next to Pause with only a 10px gap, is irreversible (also
+      // drops hist:<id>'s price history), and there's no undo.
+      if (!confirm(`Delete “${w.name}”? This can't be undone, and its price history goes with it.`)) return;
+      await Store.deleteWatcher(w.id);
+      renderWatchers();
+    });
 
-    el.append(mid, toggle, del);
+    el.append(mid, edit, toggle, del);
     box.appendChild(el);
   }
 }
 
+/* ---------- backup / restore ---------- */
+
+/**
+ * Everything lives in chrome.storage.local and nowhere else — a profile
+ * reset, a reinstall, or one misclick on Delete (now confirmed, but still)
+ * was previously unrecoverable. exportT() exports one watcher as a
+ * feed-contribution template with cookies/tokens deliberately stripped;
+ * this is the opposite thing — a full, private backup of everything,
+ * including price history, meant to be restored on THIS OR ANOTHER
+ * install, never shared or contributed anywhere.
+ */
+async function exportBackup() {
+  const watchers = await Store.watchers();
+  const settings = await Store.settings();
+  const history = {};
+  for (const id of Object.keys(watchers)) {
+    history[id] = await Store.history(id);
+  }
+  const backup = { v: 1, kind: 'vigil-backup', exportedAt: Date.now(), settings, watchers, history };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `vigil-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  say(`Downloaded a backup of ${Object.keys(watchers).length} watch(es) and settings.`);
+}
+
+async function importBackup(file) {
+  let backup;
+  try {
+    backup = JSON.parse(await file.text());
+  } catch {
+    return say('That file isn\'t valid JSON.', 'err');
+  }
+  if (backup?.kind !== 'vigil-backup' || typeof backup.watchers !== 'object') {
+    return say('That doesn\'t look like a VIGIL backup file.', 'err');
+  }
+
+  for (const w of Object.values(backup.watchers || {})) {
+    await Store.saveWatcher(w);
+  }
+  // Restore history directly via pushHistory (not syncHistory — that prunes
+  // anything not in a CURRENT items list, which would just erase everything
+  // being restored here since there's no live poll to compare against).
+  for (const [id, hist] of Object.entries(backup.history || {})) {
+    for (const [itemId, series] of Object.entries(hist)) {
+      for (const point of series) {
+        await Store.pushHistory(id, itemId, { amount: point.p, currency: point.c }, 240);
+      }
+    }
+  }
+  if (backup.settings) await Store.saveSettings(backup.settings);
+
+  say(`Restored ${Object.keys(backup.watchers).length} watch(es).`);
+  renderWatchers();
+  renderSettings();
+}
+
 /* ---------- settings ---------- */
 
+// Values are re-rendered every time settings might have changed elsewhere
+// (e.g. after an import); listeners are wired exactly ONCE at init
+// (wireSettings, below). Splitting these apart matters: renderSettings()
+// used to do both, so calling it a second time — which importBackup() now
+// legitimately needs to do, to reflect restored settings — would have
+// re-attached every listener a second time, turning one click of Export or
+// one change of Default interval into two (or more) actual writes.
 async function renderSettings() {
   const s = await Store.settings();
   $('sInterval').value = s.defaultIntervalMin;
+  // #interval (step 5's "check every" field for a NEW watch) never actually
+  // read this setting despite the field existing purely to configure it —
+  // options.html hardcoded value="5" and nothing ever repopulated it.
+  if (!state.editingId) $('interval').value = s.defaultIntervalMin;
   $('sQuiet').checked = s.quietHours.enabled;
   $('sFrom').value = s.quietHours.from;
   $('sTo').value = s.quietHours.to;
   $('sSound').checked = s.sound;
+}
 
+function wireSettings() {
   const save = async () => {
+    // Clamp to a real hour — the number inputs' min/max attributes aren't
+    // enforced on a programmatic read, so typing e.g. 25 silently stored an
+    // hour that inQuietHours() (h >= 25 || h < to) can never match, and
+    // clearing both fields (0/0) produced an empty-but-"enabled" window.
+    const clampHour = (n) => Math.min(23, Math.max(0, Number(n) || 0));
     await Store.saveSettings({
       defaultIntervalMin: Math.max(1, Number($('sInterval').value) || 5),
       sound: $('sSound').checked,
-      quietHours: { enabled: $('sQuiet').checked, from: Number($('sFrom').value) || 0, to: Number($('sTo').value) || 0 },
+      quietHours: { enabled: $('sQuiet').checked, from: clampHour($('sFrom').value), to: clampHour($('sTo').value) },
     });
   };
   ['sInterval', 'sQuiet', 'sFrom', 'sTo', 'sSound'].forEach((id) => $(id).addEventListener('change', save));
+
+  $('exportBackup')?.addEventListener('click', exportBackup);
+  $('importBackupBtn')?.addEventListener('click', () => $('importBackup')?.click());
+  $('importBackup')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (file) importBackup(file);
+    e.target.value = '';
+  });
 }
 
 loadTemplates();
@@ -706,3 +1068,4 @@ loadTabs();
 renderRules();
 renderWatchers();
 renderSettings();
+wireSettings();

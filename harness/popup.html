@@ -16,6 +16,8 @@
     .dot.off { background: var(--taken); }
     section { margin-bottom: 14px; }
     footer { display: flex; gap: 8px; }
+    #popupErr { display: none; font-size: 11px; color: var(--bad); margin: -6px 0 12px; }
+    #popupErr.show { display: block; }
   </style>
 </head>
 <body>
@@ -24,6 +26,7 @@
     <h1 class="wordmark">VIGIL</h1>
     <button id="arm" class="right primary">Arm</button>
   </header>
+  <p id="popupErr" role="status" aria-live="polite"></p>
 
   <section>
     <p class="eyebrow">Watching</p>
