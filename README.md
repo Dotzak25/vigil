@@ -117,6 +117,14 @@ In a 12-row house: dead-centre row H ≈ 95, centre row G ≈ 83, row D off to o
 
 The first poll of a new watch is always silent, or it would read you the entire seat map. If nothing changed, you hear nothing. Silence is the product working.
 
+### Fixing a watch that's gone stale
+
+Click **Edit** on any saved watch to re-pull its current data and adjust field mapping, rules, or seat geometry without starting over. This matters more than it sounds: deleting and re-recording drops that watch's rolling price history (`price_drop` medians over 30 days, gone), and Edit keeps the same watch identity so history and the diff baseline survive.
+
+### Backing it up
+
+Nothing here syncs anywhere — it's all in this browser profile. **Options → Backup → Export all watches + history** before a reinstall or a browser reset, and **Import a backup** to restore it (here, or on another machine). This is a different thing from **Export as template**, which strips your account details specifically to share the site's *shape* with other users, not to back up your own watches.
+
 ---
 
 ## Rules
