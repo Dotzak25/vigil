@@ -129,8 +129,66 @@ describe('scoreSeat — row/centre/edge scoring', () => {
   });
 });
 
+describe('findBlocks — mustIncludeIds prevents the overlap-dedup from silently dropping a fresh alert', () => {
+  test('an odd-length run of free seats: without mustIncludeIds the last seat\'s block can be discarded', () => {
+    // Row of 20 seats, only 10,11,12 free (an odd-length run of 3).
+    // flush() emits two overlapping windows: {10,11} and {11,12}. Sorted by
+    // score and deduped with no freshness awareness, only ONE survives.
+    const items = seatRow('H', Array.from({ length: 20 }, (_, i) => i + 1), {
+      available: (label) => [10, 11, 12].includes(label),
+    });
+    const { blocks } = findBlocks(items, { size: 2, numbering: 'sequential' });
+    const has = (a, b) => blocks.some((k) => {
+      const cols = k.cols.map(String);
+      return cols.includes(String(a)) && cols.includes(String(b));
+    });
+    // Without mustIncludeIds, at most one of the two overlapping windows
+    // survives — confirms the premise before testing the fix below.
+    assert.notEqual(has(10, 11) && has(11, 12), true, 'both overlapping windows should not both survive without mustIncludeIds');
+  });
+
+  test('mustIncludeIds guarantees the block containing the just-reopened seat always survives', () => {
+    const items = seatRow('H', Array.from({ length: 20 }, (_, i) => i + 1), {
+      available: (label) => [10, 11, 12].includes(label),
+    });
+    // Seat 12 (label) is the one that "just reopened" in this scenario.
+    const seat12 = items.find((it) => it.meta.col === '12');
+    const { blocks } = findBlocks(items, { size: 2, numbering: 'sequential', mustIncludeIds: new Set([seat12.id]) });
+    const containsSeat12 = blocks.some((b) => b.ids.includes(seat12.id));
+    assert.ok(containsSeat12, 'the block containing the freshly-reopened seat must survive the dedup');
+  });
+
+  test('mustIncludeIds also rescues a fresh block that would otherwise be starved by the 20-block cap', () => {
+    // A big arena-scale row (60 seats) mostly available, so far more than 20
+    // non-overlapping high-scoring blocks exist elsewhere in the row —
+    // enough to fill the cap before a specific known-fresh pair is reached
+    // in score order.
+    const items = seatRow('E', Array.from({ length: 60 }, (_, i) => i + 1), {
+      available: (label) => label % 2 === 0, // every other seat free -> lots of size-2 runs after odd gaps...
+    });
+    // Force two SPECIFIC adjacent seats free near a wall (low score) to be the "fresh" ones.
+    items[0].available = true; // seat 1
+    items[1].available = true; // seat 2
+    const seat1 = items[0], seat2 = items[1];
+    const { blocks } = findBlocks(items, {
+      size: 2, numbering: 'sequential', minScore: 0,
+      mustIncludeIds: new Set([seat1.id, seat2.id]),
+    });
+    const containsBoth = blocks.some((b) => b.ids.includes(seat1.id) && b.ids.includes(seat2.id));
+    assert.ok(containsBoth, 'a low-scoring but freshly-relevant block must survive even when 20+ higher-scoring blocks exist');
+  });
+
+  test('without mustIncludeIds, behaviour for the general "best available" case is unchanged (still score-ordered, still capped at 20)', () => {
+    const items = seatRow('H', Array.from({ length: 40 }, (_, i) => i + 1), { available: () => true });
+    const { blocks } = findBlocks(items, { size: 2, numbering: 'sequential' });
+    assert.ok(blocks.length <= 20);
+    const scores = blocks.map((b) => b.score);
+    assert.deepEqual(scores, [...scores].sort((a, b) => b - a));
+  });
+});
+
 describe('buildGeometry', () => {
-  test('a real payload coordinate (meta.x) always wins over a numbering guess', () => {
+  test('a real payload coordinate (meta.x) always wins over a numbering guess, rank-normalised to sequential integers', () => {
     const items = [
       { id: 'a', available: true, meta: { row: 1, col: '1', x: 100 } },
       { id: 'b', available: true, meta: { row: 1, col: '2', x: 101 } },
@@ -141,7 +199,38 @@ describe('buildGeometry', () => {
     ];
     const geo = buildGeometry(items, { numbering: 'centerout' });
     assert.equal(geo.usedExplicitX, true);
-    assert.deepEqual(geo.seats.map((s) => s.x).sort(), [100, 100, 100, 101, 101, 101]);
+    // Already-sequential integer coordinates rank-normalise to themselves
+    // shifted to a 0-based scale — relative order and adjacency preserved.
+    assert.deepEqual(geo.seats.map((s) => s.x).sort((a, b) => a - b), [0, 0, 0, 1, 1, 1]);
+  });
+
+  test('pixel-coordinate seat maps (x = 100, 124, 148…) still form adjacent blocks — the bug rank-normalisation exists to fix', () => {
+    // Real payload coordinates are very often NOT integers 1 apart — CSS
+    // "left" pixel offsets, or percentages. Before rank-normalisation,
+    // adjacency (`x === prev.x + 1`) never matched anything on data shaped
+    // like this, so seat_block could never fire despite the UI confidently
+    // reporting "using real coordinates — positions are exact".
+    const items = [];
+    for (let i = 0; i < 8; i++) {
+      items.push({
+        id: `s${i}`, available: true,
+        meta: { row: 'A', col: String(i + 1), x: 100 + i * 24 }, // pixel offsets
+      });
+    }
+    const { blocks } = findBlocks(items, { size: 2 });
+    assert.ok(blocks.length > 0, 'expected adjacent blocks on pixel-coordinate data, got none');
+  });
+
+  test('percentage coordinates (12.5, 25.0, 37.5…) also normalise correctly', () => {
+    const items = [];
+    for (let i = 0; i < 6; i++) {
+      items.push({
+        id: `s${i}`, available: true,
+        meta: { row: 'A', col: String(i + 1), x: 12.5 * (i + 1) },
+      });
+    }
+    const { blocks } = findBlocks(items, { size: 2 });
+    assert.ok(blocks.length > 0, 'expected adjacent blocks on percentage-coordinate data, got none');
   });
 
   test('fewer than 6 resolvable seats -> no geometry (unreserved seating)', () => {

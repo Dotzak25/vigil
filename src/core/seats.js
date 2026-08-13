@@ -99,6 +99,22 @@ export function buildGeometry(items, opts = {}) {
     sections.get(key).push(s);
   }
 
+  // A real coordinate from the page always wins over a numbering guess — but
+  // "real" often means pixels (100, 124, 148…) or percentages (12.5, 25.0…),
+  // not integers spaced 1 apart. Adjacency below is exactly "x === prev.x+1",
+  // so on raw pixel/percent values every seat looks isolated and no block is
+  // ever found, while describeGeometry() confidently reports the positions
+  // as exact. Only the RELATIVE ORDER of coordinates matters for adjacency
+  // and centring, so rank-normalise them to sequential integers per section —
+  // this is a no-op when x already is sequential integers.
+  for (const [, list] of sections) {
+    if (list.some((s) => s.hasExplicitX)) {
+      const distinct = [...new Set(list.map((s) => s.x))].sort((a, b) => a - b);
+      const rank = new Map(distinct.map((v, i) => [v, i]));
+      for (const s of list) s.x = rank.get(s.x);
+    }
+  }
+
   const built = new Map();
   for (const [key, list] of sections) {
     const rows = [...new Set(list.map((s) => s.r))].sort((a, b) => a - b);
@@ -162,9 +178,17 @@ export function scoreSeat(seat, geo, profile = 'standard') {
 /**
  * Runs of `size` physically adjacent available seats.
  * Adjacency is a gap of exactly 1 in x — never in label.
+ *
+ * @param opts.mustIncludeIds  Set of item ids that must survive the overlap
+ *   dedup below if any block containing one exists. Without this, a run of
+ *   N free seats produces N-1 overlapping candidate blocks and the dedup
+ *   keeps an arbitrary, score-ordered subset — for an odd-length run this
+ *   can silently drop the ONE block that contains the seat which just
+ *   opened, so the alert this function exists to produce never fires. This
+ *   is what rules.js passes the freshly-reopened seat ids as, every time.
  */
 export function findBlocks(items, opts = {}) {
-  const { size = 2, profile = 'standard', minScore = 0 } = opts;
+  const { size = 2, profile = 'standard', minScore = 0, mustIncludeIds = null } = opts;
   const geo = buildGeometry(items, opts);
   if (!geo) return { geometry: null, blocks: [], reason: 'no-geometry' };
 
@@ -215,15 +239,29 @@ export function findBlocks(items, opts = {}) {
 
   const filtered = blocks.filter((b) => b.score >= minScore).sort((a, b) => b.score - a.score);
 
+  const overlaps = (kept, b) =>
+    kept.some((k) => k.rowIndex === b.rowIndex && k.section === b.section && k.ids.some((id) => b.ids.includes(id)));
+
+  // Two passes: first guarantee every non-overlapping block touching a
+  // must-include id makes it in — regardless of score or the cap below —
+  // then fill remaining slots by score as before. A must-include block can
+  // still lose to an EARLIER must-include block it overlaps with (there's
+  // no ambiguity to resolve there: they share a seat, only one can be kept),
+  // but it can never lose to an unrelated higher-scoring block the way it
+  // could when everything was a single score-sorted pass.
+  const must = mustIncludeIds ? filtered.filter((b) => b.ids.some((id) => mustIncludeIds.has(id))) : [];
+  const rest = mustIncludeIds ? filtered.filter((b) => !b.ids.some((id) => mustIncludeIds.has(id))) : filtered;
+
   const kept = [];
-  for (const b of filtered) {
-    const overlaps = kept.some(
-      (k) => k.rowIndex === b.rowIndex && k.section === b.section && k.ids.some((id) => b.ids.includes(id))
-    );
-    if (!overlaps) kept.push(b);
+  for (const b of must) {
+    if (!overlaps(kept, b)) kept.push(b);
+  }
+  for (const b of rest) {
     if (kept.length >= 20) break;
+    if (!overlaps(kept, b)) kept.push(b);
   }
 
+  kept.sort((a, b) => b.score - a.score);
   return { geometry: geo, blocks: kept };
 }
 

@@ -95,17 +95,76 @@ export function findItemArrays(root, { maxDepth = 8, minLength = 2 } = {}) {
   return found.sort((a, b) => b.score - a.score).slice(0, 12);
 }
 
+/* ---------- anchored path resolution ---------- */
+
+/** Field names that plausibly identify a sibling regardless of position. */
+const ANCHOR_KEY_RE = /^(id|code|key|slug|uuid|guid|date|time|start|showtimeid|sessionid|performanceid|screeningid)$/i;
+
+/**
+ * itemsPath can contain a numeric array index picked up by findItemArrays —
+ * e.g. ["screenings", 5, "seatmap", "seats"], "the 6th screening today". On
+ * every future poll that same index is re-resolved against whatever's THEN
+ * at position 5. A site listing "today's showtimes" commonly drops past
+ * ones as the day goes on, so index 5 silently becomes a different
+ * screening — the watcher keeps running, keeps finding "seats", and can
+ * produce a fully-formed, wrong seat_block alert for an auditorium nobody
+ * is watching. suggestAnchor(), called once when a capture is picked, looks
+ * for a stable-looking identifying field on the object at that index so
+ * resolveItemsPath() can re-locate the right sibling by VALUE instead of by
+ * position on every subsequent poll.
+ */
+export function suggestAnchor(payload, path) {
+  for (let i = 0; i < path.length; i++) {
+    if (typeof path[i] !== 'number') continue;
+    const parentPath = path.slice(0, i);
+    const parent = getPath(payload, parentPath);
+    if (!Array.isArray(parent)) continue;
+    const sample = parent[path[i]];
+    if (!sample || typeof sample !== 'object') continue;
+    const key = Object.keys(sample).find((k) => ANCHOR_KEY_RE.test(k));
+    if (key == null || sample[key] == null) continue;
+    return { parentPath, key, value: sample[key] };
+  }
+  return null;
+}
+
+/**
+ * Resolves itemsPath, preferring spec.itemsAnchor (see suggestAnchor) over
+ * the raw numeric index it was recorded next to, when one is present and
+ * still matches something. Falls back to the raw path — today's behaviour,
+ * never worse — when there's no anchor, or the anchor no longer matches
+ * anything (the item it pointed at has genuinely rotated out).
+ */
+export function resolveItemsPath(payload, spec) {
+  if (!spec.itemsPath?.length) return Array.isArray(payload) ? payload : [];
+
+  const anchor = spec.itemsAnchor;
+  if (anchor) {
+    const parent = getPath(payload, anchor.parentPath);
+    if (Array.isArray(parent)) {
+      const idx = parent.findIndex((el) => el && typeof el === 'object' && String(el[anchor.key]) === String(anchor.value));
+      if (idx !== -1) {
+        const rest = spec.itemsPath.slice(anchor.parentPath.length + 1);
+        const resolved = getPath(parent[idx], rest);
+        if (Array.isArray(resolved)) return resolved;
+      }
+    }
+  }
+
+  const raw = getPath(payload, spec.itemsPath);
+  return Array.isArray(raw) ? raw : [];
+}
+
 /* ---------- the extractor ---------- */
 
 /**
  * spec = {
- *   itemsPath, fields: { id,label,price,available,row,col,x,section,size,url },
+ *   itemsPath, itemsAnchor, fields: { id,label,price,available,row,col,x,section,size,url },
  *   invertAvailable, countryHint, defaultCurrency, numbering
  * }
  */
 export function extractItems(payload, spec = {}) {
-  const raw = spec.itemsPath?.length ? getPath(payload, spec.itemsPath) : payload;
-  const list = Array.isArray(raw) ? raw : [];
+  const list = spec.itemsPath?.length ? resolveItemsPath(payload, spec) : (Array.isArray(payload) ? payload : []);
   const f = spec.fields || {};
 
   const pick = (obj, key) => {

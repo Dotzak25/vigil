@@ -187,19 +187,33 @@ export function templateMatches(template, capture) {
   let url;
   try { url = new URL(capture.url); } catch { return 0; }
 
-  if (url.hostname !== template.host && !url.hostname.endsWith(`.${template.host}`)) return 0;
+  // matchChain/matchMarket both normalise away a leading "www." (chains.js,
+  // markets.js); this didn't, so a template contributed from a session on
+  // www.example.com never matched a capture on the apex domain or on
+  // api.example.com — a silent feed miss, not a wrong match, but worth
+  // being consistent about.
+  const host = url.hostname.replace(/^www\./, '');
+  const templateHost = template.host.replace(/^www\./, '');
+  if (host !== templateHost && !host.endsWith(`.${templateHost}`)) return 0;
 
   const pattern = generalisePath(url.pathname);
   if (pattern === template.urlPattern) return 1;
 
-  // Partial credit for a path that differs only in one segment — sites version
-  // their APIs (/v1/ → /v2/) far more often than they restructure them.
+  // Partial credit for a path that differs in exactly one segment — sites
+  // version their APIs (/v1/ → /v2/) far more often than they restructure
+  // them — but ONLY if that segment isn't the LAST one. The last segment is
+  // almost always the actual resource name ("seatplan" vs "prices", "seats"
+  // vs "checkout"), and those score 0.75-0.8 under a pure same/total ratio —
+  // exactly the auto-apply threshold options.js uses to offer one-click
+  // "Apply template" — which would silently hand a user a completely
+  // unrelated endpoint's field mapping because the path merely happened to
+  // be the same length.
   const a = pattern.split('/');
   const b = template.urlPattern.split('/');
   if (a.length !== b.length) return 0;
-  const same = a.filter((seg, i) => seg === b[i]).length;
-  const ratio = same / a.length;
-  return ratio >= 0.75 ? ratio : 0;
+  const diffs = a.reduce((idxs, seg, i) => (seg === b[i] ? idxs : [...idxs, i]), []);
+  if (diffs.length !== 1 || diffs[0] === a.length - 1) return 0;
+  return (a.length - 1) / a.length;
 }
 
 /** Best template for a capture, or null. */

@@ -42,15 +42,41 @@ describe('templateMatches / pickTemplate', () => {
     assert.equal(templateMatches(t, cap), 0);
   });
 
-  test('a versioned path (v1 -> v2) gets partial credit, not a hard miss', () => {
-    const t = baseTemplate();
-    const cap = { url: 'https://www.cinestar.de/api/v2/showtime/998877/seatplan' };
-    // path lengths differ (extra /v2 segment) -> templateMatches requires equal
-    // segment count for partial credit, so this specific case is a legitimate 0;
-    // same-length-but-one-segment-different is the case that gets partial credit:
-    const capSameLength = { url: 'https://www.cinestar.de/api/showtime/998877/seats' };
+  test('a versioned MIDDLE segment (v1 -> v2) gets partial credit, not a hard miss', () => {
+    // 6 segments so the single differing one (not the last) still clears
+    // the >=0.75 auto-apply threshold used in options.js: 5/6 ≈ 0.83.
+    const t = { ...baseTemplate(), urlPattern: '/api/v1/showtime/{id}/seats/data' };
+    const cap = { url: 'https://www.cinestar.de/api/v2/showtime/998877/seats/data' };
+    const score = templateMatches(t, cap);
+    assert.ok(score > 0 && score < 1, `expected partial credit for a versioned middle segment, got ${score}`);
+  });
+
+  test('a same-length path differing only in its LAST segment scores 0 — never partial-credit the actual resource name', () => {
+    // This is the regression case: "seatplan" vs "seats" (or "prices",
+    // "checkout", "tickets"...) is a different endpoint, not a version bump,
+    // even though it scores 0.75-0.8 under a naive same/total ratio — which
+    // is exactly options.js's auto-apply threshold for "Apply template".
+    const t = baseTemplate(); // urlPattern: /api/showtime/{id}/seatplan
+    const capDifferentResource = { url: 'https://www.cinestar.de/api/showtime/998877/prices' };
+    const capCheckout = { url: 'https://www.cinestar.de/booking/998877/checkout' }; // different path shape too, sanity 0
+    assert.equal(templateMatches(t, capDifferentResource), 0);
+    assert.equal(templateMatches(t, capCheckout), 0);
+  });
+
+  test('more than one differing segment never gets partial credit, regardless of ratio', () => {
+    const t = { ...baseTemplate(), urlPattern: '/api/v1/showtime/{id}/seats/data' };
+    const cap = { url: 'https://www.cinestar.de/api/v2/session/998877/seats/info' }; // 2 segments differ, one of them the last
     assert.equal(templateMatches(t, cap), 0);
-    assert.ok(templateMatches(t, capSameLength) > 0 && templateMatches(t, capSameLength) < 1);
+  });
+
+  test('a template contributed from www.<host> still matches a capture on the apex domain (and vice versa)', () => {
+    const t = baseTemplate(); // host: 'www.cinestar.de'
+    const apex = { url: 'https://cinestar.de/api/showtime/998877/seatplan' };
+    assert.equal(templateMatches(t, apex), 1);
+
+    const tApex = { ...baseTemplate(), host: 'cinestar.de' };
+    const withWww = { url: 'https://www.cinestar.de/api/showtime/998877/seatplan' };
+    assert.equal(templateMatches(tApex, withWww), 1);
   });
 
   test('pickTemplate returns the best-scoring template with its confidence', () => {

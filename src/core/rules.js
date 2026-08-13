@@ -26,11 +26,13 @@ export function evaluate(ctx) {
   const { watcher, items, changes, firstRun, history } = ctx;
   if (firstRun) return [];
 
+  const hasSeatBlock = (watcher.rules || []).some((r) => r.type === RULE_TYPES.SEAT_BLOCK);
+
   const hits = [];
   for (const rule of watcher.rules || []) {
     switch (rule.type) {
       case RULE_TYPES.SEAT_BLOCK: hits.push(...seatBlockRule(rule, items, changes, watcher)); break;
-      case RULE_TYPES.RESTOCK: hits.push(...restockRule(rule, changes)); break;
+      case RULE_TYPES.RESTOCK: hits.push(...restockRule(rule, changes, hasSeatBlock)); break;
       case RULE_TYPES.NEW_ITEM: hits.push(...newItemRule(rule, changes)); break;
       case RULE_TYPES.FORMAT_ADDED: hits.push(...formatAddedRule(rule, changes)); break;
       case RULE_TYPES.PRICE_BELOW: hits.push(...priceBelowRule(rule, changes)); break;
@@ -52,17 +54,22 @@ function seatBlockRule(rule, items, changes, watcher) {
   );
   if (!opened.length) return [];
 
+  const openedIds = new Set(opened.map((c) => c.item.id));
+
   const geo = watcher.geometry || {};
+  // mustIncludeIds: without this, an odd-length run of free seats produces
+  // overlapping candidate blocks and the score-based dedup in findBlocks can
+  // discard the ONE block that contains the seat which just reopened — the
+  // alert this rule exists to produce would silently never fire.
   const { blocks } = findBlocks(items, {
     size: rule.partySize || 2,
     profile: rule.profile || 'standard',
     minScore: rule.minScore ?? 60,
     numbering: geo.numbering || 'sequential',
     rowOrder: geo.rowOrder || 'front-first',
+    mustIncludeIds: openedIds,
   });
   if (!blocks.length) return [];
-
-  const openedIds = new Set(opened.map((c) => c.item.id));
 
   // A block counts only if one of the newly-freed seats is in it — otherwise
   // good seats that have sat there all week would re-alert every poll.
@@ -73,8 +80,15 @@ function seatBlockRule(rule, items, changes, watcher) {
     fresh = fresh.filter((b) => want.has(String(b.row).toUpperCase()));
   }
   if (rule.section) {
-    const re = new RegExp(rule.section, 'i');
-    fresh = fresh.filter((b) => re.test(String(b.section ?? '')));
+    // A user-typed regex (copied off a section name like "Saal 1 (+VIP)" or
+    // "Circle [A") can easily be invalid. matcher() below already guards the
+    // identical case for restock/new_item's `match` field — this didn't,
+    // which meant a bad section filter threw out of evaluate() entirely,
+    // landing in the poll's failure path: backoff, a "keeps failing"
+    // notification, and the shared template's health getting penalised for
+    // a fault that has nothing to do with the template.
+    const re = safeRegExp(rule.section);
+    fresh = re ? fresh.filter((b) => re.test(String(b.section ?? ''))) : fresh;
   }
   if (!fresh.length) return [];
 
@@ -98,18 +112,26 @@ function seatBlockRule(rule, items, changes, watcher) {
 
 /* ---------- stock ---------- */
 
-function matcher(rule) {
-  if (!rule.match) return null;
-  try { return new RegExp(rule.match, 'i'); } catch { return null; }
+function safeRegExp(pattern) {
+  if (!pattern) return null;
+  try { return new RegExp(pattern, 'i'); } catch { return null; }
 }
 
-function restockRule(rule, changes) {
+const matcher = (rule) => safeRegExp(rule.match);
+
+function restockRule(rule, changes, hasSeatBlock) {
   const re = matcher(rule);
   return changes
-    // Seats belong to seat_block. Without this guard a watcher carrying both
-    // rules reports every freed seat twice — once as a block, once each as a
-    // "back in stock" item.
-    .filter((c) => !(c.item.meta?.row != null && c.item.meta?.col != null))
+    // Seats belong to seat_block, not restock — but only when this watcher
+    // actually HAS a seat_block rule configured. This guard used to apply
+    // unconditionally, so a drop/resale item whose payload merely contains
+    // any field loosely matching /row/i or named "position"/"number" (both
+    // suggestFields fallbacks, in extract.js) would get meta.row/meta.col
+    // populated and silently lose its restock alert forever, with nothing
+    // in the UI to explain why. If there's no seat_block rule to conflict
+    // with, there's nothing to double-report, so the guard has no reason
+    // to apply at all.
+    .filter((c) => !(hasSeatBlock && c.item.meta?.row != null && c.item.meta?.col != null))
     // RELEASED is excluded on purpose: a scheduled presale opening is not the
     // same event as an item genuinely coming back into stock.
     .filter((c) => c.type === CHANGE.REOPENED)
@@ -170,6 +192,14 @@ function formatAddedRule(rule, changes) {
 /* ---------- price ---------- */
 
 function priceBelowRule(rule, changes) {
+  // markets.js ships resale's default price_below rule with `value: null` —
+  // an explicit "not set yet, the user should fill this in" sentinel. But
+  // Number(null) is 0, not NaN, so the isFinite check below let it through
+  // as an active limit of $0 — every watcher inheriting the resale default
+  // untouched fired a nonsense "Under $0.00" alert the first time a listing
+  // dropped to $0 (a common way sites represent sold/withdrawn). Reject the
+  // sentinel explicitly, before it ever reaches Number().
+  if (rule.value == null || rule.value === '') return [];
   const limit = Number(rule.value);
   if (!Number.isFinite(limit)) return [];
 
