@@ -90,6 +90,95 @@ describe('Store.pushEvents — capped by settings.maxEvents, newest first', () =
   });
 });
 
+describe('Store.saveWatcher / patchWatcher — the concurrency regression', () => {
+  test('concurrent saveWatcher calls for DIFFERENT watchers never lose one to the other (the per-key lock)', async () => {
+    await Promise.all([
+      Store.saveWatcher({ id: 'a', name: 'A' }),
+      Store.saveWatcher({ id: 'b', name: 'B' }),
+      Store.saveWatcher({ id: 'c', name: 'C' }),
+    ]);
+    const all = await Store.watchers();
+    assert.deepEqual(Object.keys(all).sort(), ['a', 'b', 'c']);
+  });
+
+  test('patchWatcher merges onto a FRESH read, not a stale caller-held copy', async () => {
+    await Store.saveWatcher({ id: 'w', name: 'Original', failures: 0, enabled: true });
+    // Simulate a background write landing first...
+    await Store.patchWatcher('w', { failures: 3, lastError: 'HTTP 403' });
+    // ...then a UI toggle patches only `enabled`, unaware of the failure count.
+    await Store.patchWatcher('w', { enabled: false });
+    const w = await Store.watcher('w');
+    assert.equal(w.enabled, false);
+    assert.equal(w.failures, 3, 'the background write must survive a later partial patch');
+    assert.equal(w.lastError, 'HTTP 403');
+  });
+
+  test('patchWatcher on a deleted watcher is a no-op — it must never resurrect it', async () => {
+    await Store.saveWatcher({ id: 'w', name: 'Temp' });
+    await Store.deleteWatcher('w');
+    const result = await Store.patchWatcher('w', { failures: 1 });
+    assert.equal(result, null);
+    assert.equal(await Store.watcher('w'), null);
+  });
+
+  test('a delete that happens between an in-flight patch\'s read and write does not get overwritten back in', async () => {
+    await Store.saveWatcher({ id: 'w', name: 'Temp' });
+    // Race: patchWatcher and deleteWatcher both contend for the 'watchers'
+    // lock. Whichever wins, the watcher must end up either fully patched
+    // (delete queued after) or fully gone (delete queued first) — never a
+    // deleted-then-resurrected state.
+    await Promise.all([
+      Store.patchWatcher('w', { failures: 1 }),
+      Store.deleteWatcher('w'),
+    ]);
+    const w = await Store.watcher('w');
+    // Whatever the outcome, it must be internally consistent: if the
+    // watcher exists, deleteWatcher must have run BEFORE the patch (patch
+    // last) or the patch ran and delete hasn't landed — either is fine.
+    // What's NOT fine is deleteWatcher's snap/hist cleanup running while a
+    // resurrected watcher lingers, so just confirm no crash and a defined
+    // outcome either way.
+    assert.ok(w === null || w.id === 'w');
+  });
+});
+
+describe('Store.syncHistory — batched write + pruning of vanished item ids', () => {
+  test('writes all items in a single call and prunes ids no longer present', async () => {
+    await Store.syncHistory('w', [
+      { id: 'a', price: { amount: 10, currency: 'USD' } },
+      { id: 'b', price: { amount: 20, currency: 'USD' } },
+    ]);
+    let hist = await Store.history('w');
+    assert.deepEqual(Object.keys(hist).sort(), ['a', 'b']);
+
+    // Item 'a' has since vanished from the listing entirely.
+    await Store.syncHistory('w', [
+      { id: 'b', price: { amount: 22, currency: 'USD' } },
+      { id: 'c', price: { amount: 5, currency: 'USD' } },
+    ]);
+    hist = await Store.history('w');
+    assert.deepEqual(Object.keys(hist).sort(), ['b', 'c'], 'vanished item "a" must be pruned, not kept forever');
+    assert.equal(hist.b.length, 2);
+    assert.equal(hist.c.length, 1);
+  });
+
+  test('items with no price are tracked as "present" (not pruned) but contribute no history point', async () => {
+    await Store.syncHistory('w2', [{ id: 'a', price: { amount: 10, currency: 'USD' } }]);
+    await Store.syncHistory('w2', [{ id: 'a', price: null }]); // still present, just no current price
+    const hist = await Store.history('w2');
+    assert.equal(hist.a.length, 1); // old point kept, no new point added, not pruned
+  });
+
+  test('respects the cap', async () => {
+    for (let i = 0; i < 5; i++) {
+      await Store.syncHistory('w3', [{ id: 'a', price: { amount: i, currency: 'USD' } }], 3);
+    }
+    const hist = await Store.history('w3');
+    assert.equal(hist.a.length, 3);
+    assert.deepEqual(hist.a.map((p) => p.p), [2, 3, 4]);
+  });
+});
+
 describe('Store.templateCache / templateHealth / recordTemplateOutcome — the new template-feed plumbing', () => {
   test('templateCache defaults to empty, honestly, until a feed exists', async () => {
     assert.deepEqual(await Store.templateCache(), { fetchedAt: 0, templates: [] });

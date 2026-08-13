@@ -72,28 +72,78 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 /* ---------- the pass ---------- */
 
+// Reentrancy guard for tick() itself, and a per-watcher in-flight guard so
+// the popup's "Check" button can never process the same watcher the
+// scheduled sweep is already mid-replay on. Both are plain module-scope
+// state, which is correct HERE specifically: unlike "is this tab
+// recording" (a fact the user needs to survive a worker restart), an
+// in-flight marker only needs to survive for the lifetime of the operation
+// it's guarding — if the worker dies mid-replay, that replay is gone
+// regardless, so the guard resetting to "nothing in flight" on restart is
+// exactly correct, not a bug.
+//
+// Without this: chrome.alarms fires every minute regardless of whether the
+// previous tick finished (no built-in backpressure), so one slow/hanging
+// endpoint, or simply more due watchers than fit in a minute at ~1s each,
+// causes tick #2 to start while tick #1 is still running. Both then read
+// the SAME watcher list, both process the same due watchers, and both send
+// a notification for the same real change — plus each one's read-modify
+// -write of the watcher list can lose the other's freshly-written
+// failure/backoff state.
+let tickRunning = false;
+const inFlightWatchers = new Set();
+
 async function tick() {
-  const settings = await Store.settings();
-  if (!settings.armed) return;
+  if (tickRunning) return;
+  tickRunning = true;
+  try {
+    const settings = await Store.settings();
+    if (!settings.armed) return;
 
-  const watchers = await Store.watchers();
-  const now = Date.now();
+    const watchers = await Store.watchers();
+    const now = Date.now();
 
-  const due = Object.values(watchers).filter(
-    (w) => w.enabled !== false && (w.nextRunAt || 0) <= now
-  );
+    const due = Object.values(watchers).filter(
+      (w) => w.enabled !== false && (w.nextRunAt || 0) <= now
+    );
 
-  // Never fire two sites in the same millisecond; stagger politely.
-  for (const w of due) {
-    await runWatcher(w, settings);
-    await sleep(400 + Math.random() * 600);
+    // Hits found during quiet hours get a badge count instead of a
+    // notification (see announce()) — accumulated across the whole sweep
+    // and applied ONCE at the end, because refreshBadge() below would
+    // otherwise immediately overwrite a per-watcher badge write with the
+    // routine "armed watcher count" badge within the same tick.
+    let quietHits = 0;
+
+    // Never fire two sites in the same millisecond; stagger politely.
+    for (const w of due) {
+      const result = await runWatcher(w, settings);
+      if (result.quiet) quietHits += result.hitCount;
+      await sleep(400 + Math.random() * 600);
+    }
+
+    if (quietHits > 0) {
+      await chrome.action.setBadgeBackgroundColor({ color: '#E8A33D' });
+      await chrome.action.setBadgeText({ text: String(Math.min(99, quietHits)) });
+    } else {
+      await refreshBadge();
+    }
+  } finally {
+    tickRunning = false;
   }
-
-  await refreshBadge();
 }
 
+/** @returns {{hitCount: number, quiet: boolean}} */
 async function runWatcher(watcher, settings) {
+  // A manual "Check now" from the popup and the scheduled sweep can both
+  // pick up the same due watcher. Without this guard both would replay the
+  // same request, evaluate the same transition, and each independently
+  // fire a notification and log entry for one real change.
+  if (inFlightWatchers.has(watcher.id)) return { hitCount: 0, quiet: false };
+  inFlightWatchers.add(watcher.id);
+
   const patch = { lastRunAt: Date.now() };
+  let hitCount = 0;
+  const quiet = inQuietHours(settings);
 
   try {
     const payload = await replay(watcher.request);
@@ -108,13 +158,15 @@ async function runWatcher(watcher, settings) {
     const prev = await Store.snapshot(watcher.id);
     const { changes, firstRun } = diffItems(prev, items);
 
-    // Record prices before evaluating, so the median includes today.
-    for (const it of items) {
-      if (it.price) await Store.pushHistory(watcher.id, it.id, it.price);
-    }
+    // Single batched read-modify-write for this whole poll's history,
+    // instead of one per item — and prunes ids no longer in the listing,
+    // so a large seat map's history doesn't grow without bound. Record
+    // before evaluating, so the median includes today.
+    await Store.syncHistory(watcher.id, items);
     const history = await Store.history(watcher.id);
 
     const hits = evaluate({ watcher, items, changes, firstRun, history });
+    hitCount = hits.length;
 
     await Store.saveSnapshot(watcher.id, toSnapshot(items));
 
@@ -167,12 +219,25 @@ async function runWatcher(watcher, settings) {
         priority: 0,
       });
     }
+  } finally {
+    inFlightWatchers.delete(watcher.id);
   }
 
-  await Store.saveWatcher({ ...watcher, ...patch });
+  // patchWatcher (not saveWatcher) merges onto a FRESH read and is a no-op
+  // if the watcher was deleted while this replay was in flight — without
+  // that, a delete followed shortly by this write resurrects the watcher
+  // with whatever result this poll happened to produce, and it silently
+  // keeps polling forever with no way to tell it was ever "deleted".
+  await Store.patchWatcher(watcher.id, patch);
+
+  return { hitCount, quiet };
 }
 
-function schedule(minutes) {
+// Exported despite this file being loaded directly as the background
+// service worker (nothing else imports it at runtime) — purely so these two
+// pure functions can be unit-tested under plain Node without needing a full
+// chrome.* shim for the rest of the file's side effects.
+export function schedule(minutes) {
   // ±20% jitter. Perfectly periodic requests are the easiest thing in the
   // world for a WAF to spot.
   const jitter = 0.8 + Math.random() * 0.4;
@@ -217,10 +282,12 @@ async function replay(request) {
 /* ---------- telling you ---------- */
 
 async function announce(hits, settings) {
-  if (inQuietHours(settings)) {
-    await chrome.action.setBadgeText({ text: String(Math.min(99, hits.length)) });
-    return;
-  }
+  // During quiet hours the badge is set once, for the WHOLE sweep's total,
+  // by tick() — setting it here per-watcher used to get silently
+  // overwritten within the same second by tick()'s own refreshBadge() call
+  // after the loop, so quiet-hours hits produced no visible signal at all
+  // beyond the event log.
+  if (inQuietHours(settings)) return;
 
   const top = hits.sort((a, b) => (b.priority || 0) - (a.priority || 0))[0];
   const more = hits.length - 1;
@@ -258,7 +325,7 @@ chrome.notifications.onClicked.addListener(async (id) => {
   chrome.notifications.clear(id);
 });
 
-function inQuietHours(settings) {
+export function inQuietHours(settings) {
   const q = settings.quietHours;
   if (!q?.enabled) return false;
   const h = new Date().getHours();
@@ -340,9 +407,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       case 'vigil:startRecording': {
         const tabs = await getRecordingTabs();
-        tabs.add(msg.tabId);
-        await setRecordingTabs(tabs);
+        // Starting a new recording used to leave any OTHER tab's recording
+        // silently active — an abandoned tab from a previous, forgotten
+        // recording kept capturing (and, worse, kept feeding its captures
+        // into whatever buffer the CURRENT recording reads from, see
+        // vigil:capture below) for the rest of the browser session. Stop
+        // every other tab explicitly before starting this one.
+        for (const oldTabId of tabs) {
+          if (oldTabId === msg.tabId) continue;
+          await chrome.tabs.sendMessage(oldTabId, { type: 'vigil:setRecording', recording: false }).catch(() => {});
+        }
+        await setRecordingTabs(new Set([msg.tabId]));
         await Store.clearCaptures();
+        // Ensure the content scripts are actually registered for this
+        // origin before responding — options.js decides whether to reload
+        // the tab based on this call succeeding, and syncContentScripts()
+        // is otherwise only triggered by a chrome.permissions.onAdded event
+        // whose timing relative to this message isn't guaranteed.
+        await syncContentScripts();
         await chrome.tabs.sendMessage(msg.tabId, { type: 'vigil:setRecording', recording: true }).catch(() => {});
         return sendResponse({ ok: true });
       }
@@ -355,9 +437,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return sendResponse({ ok: true, captures: await Store.captures() });
       }
 
-      case 'vigil:capture':
+      case 'vigil:capture': {
+        // Only accept a capture from a tab this extension believes is
+        // currently recording. Without this, an abandoned recording tab
+        // (see vigil:startRecording above) or simply background traffic
+        // from ANY tab with a granted permission could push captures into
+        // the buffer the user is picking from for a totally different
+        // site's recording session — pushCapture's 40-item cap and
+        // dedupe-by-URL then risk evicting the request the user actually
+        // needs before they click Stop.
+        const tabs = await getRecordingTabs();
+        if (!tabs.has(sender.tab?.id)) return sendResponse({ ok: false, error: 'not recording' });
         await Store.pushCapture(msg.capture);
         return sendResponse({ ok: true });
+      }
 
       case 'vigil:runNow': {
         const w = await Store.watcher(msg.id);
