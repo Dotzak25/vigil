@@ -5,6 +5,7 @@ import { describeGeometry, toMinimap } from '../core/seats.js';
 import { formatPrice } from '../core/money.js';
 import { FORMATS, formatLabel } from '../catalog/vocab.js';
 import { isPlausibleWebhookUrl } from '../core/webhook.js';
+import { diagnoseWatcher, silenceReport } from '../core/diagnose.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -864,6 +865,48 @@ $('exportT').addEventListener('click', async () => {
  * the same id here means snap:<id>/hist:<id> are untouched and the diff
  * baseline survives.
  */
+/**
+ * "Why is this quiet?" — the honest answer to the question VIGIL's own
+ * design makes unanswerable otherwise. Silence is supposed to mean nothing
+ * changed; this checks whether it actually means the watch could never fire
+ * in the first place. Runs against the watch's LIVE data, not a stored
+ * sample, because the page shape may have drifted since setup.
+ */
+async function explainSilence(w, btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'vigil:testRequest', request: w.request });
+    if (!res?.ok) {
+      return say(`“${w.name}” can't reach its page right now (${res?.error || 'unreachable'}) — so it isn't quiet, it's broken. Try Edit to re-record it.`, 'err');
+    }
+    const items = extractItems(res.payload, w.spec);
+    const problems = diagnoseWatcher(w, items);
+
+    if (!problems.length) {
+      const runs = w.runCount || 0;
+      return say(
+        `“${w.name}” looks healthy — ${items.length} items read, rules are capable of firing${
+          runs ? `, checked ${runs} times so far` : ''
+        }. Nothing has changed yet, which is the normal state. Silence here means it's working.`,
+      );
+    }
+
+    const blocked = problems.filter((p) => p.severity === 'blocked');
+    const kind = blocked.length ? 'err' : 'good';
+    const lead = blocked.length
+      ? `“${w.name}” can never fire as configured:`
+      : `“${w.name}” can fire, but worth a look:`;
+    say(`${lead} ${problems.map((p) => p.message).join(' · ')}`, kind);
+  } catch (e) {
+    say(`Couldn't check “${w.name}”: ${e?.message || e}`, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
 async function editWatcher(w) {
   say(`Loading current data for “${w.name}”…`);
   let res;
@@ -919,14 +962,28 @@ async function renderWatchers() {
     // saved-watch list — the crash previously wasn't even caught anywhere
     // near here, it just surfaced in the console with nothing rendered.
     const ruleCount = w.rules?.length ?? 0;
+    // A long-quiet watch gets a passive nudge in its own row — not a
+    // notification, not a nag. A genuinely quiet watch is the normal case
+    // and silenceReport() only speaks up after hundreds of runs across
+    // weeks with literally zero hits, where "nothing at all, ever" has
+    // become information rather than noise.
+    const quiet = silenceReport(w);
     mid.innerHTML = `<div><strong>${esc(w.name)}</strong> <span class="muted" style="font-size:11px">${esc(w.profile?.name || '')}</span></div>
       <div class="muted num" style="font-size:11px">every ${w.intervalMin}m · ${ruleCount} rule(s) · ${w.itemCount ?? '—'} items${
-        w.lastError ? ` · <span style="color:var(--bad)">${esc(w.lastError).slice(0, 60)}</span>` : ''}</div>`;
+        w.hitCount ? ` · ${w.hitCount} hit(s)` : ''}${
+        w.lastError ? ` · <span style="color:var(--bad)">${esc(w.lastError).slice(0, 60)}</span>` : ''}</div>${
+        quiet ? `<div class="muted" style="font-size:11px;color:var(--signal)">Quiet for a long time — worth checking with "Why quiet?"</div>` : ''}`;
 
     const edit = document.createElement('button');
     edit.className = 'ghost';
     edit.textContent = 'Edit';
     edit.addEventListener('click', () => editWatcher(w));
+
+    const why = document.createElement('button');
+    why.className = 'ghost';
+    why.textContent = 'Why quiet?';
+    why.title = 'Check whether this watch is actually capable of firing, against its live data right now.';
+    why.addEventListener('click', () => explainSilence(w, why));
 
     const toggle = document.createElement('button');
     toggle.className = 'ghost';
@@ -953,7 +1010,7 @@ async function renderWatchers() {
       renderWatchers();
     });
 
-    el.append(mid, edit, toggle, del);
+    el.append(mid, why, edit, toggle, del);
     box.appendChild(el);
   }
 }

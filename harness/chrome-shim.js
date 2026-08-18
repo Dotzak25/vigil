@@ -28,21 +28,32 @@ function log(...args) {
 // ---- a realistic captured request: a German cinema (CineStar, center-out
 // seat numbering) seat map, in German, with a comma-decimal EUR price ----
 
+// A 12-row x 16-seat house. This used to be a SINGLE row, which turned out
+// to be an actively misleading fixture: seat scoring weights how far back a
+// row sits, so a one-row auditorium tops out around 55 and the shipped
+// default minScore of 70 could never fire against it. VIGIL's own new
+// diagnostic (core/diagnose.js) caught that the moment it was pointed at
+// this fixture. A real house of this size peaks in the mid-90s, so the
+// defaults behave here the way they behave in reality.
+const ROWS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M'];
 const SEAT_LABELS = Array.from({ length: 16 }, (_, i) => i + 1);
 
-// Only seats 1 & 2 are free -> they are the physically-adjacent, dead-centre
-// pair under center-out numbering (see README's seat-numbering section).
-// Every other seat is "besetzt" (taken).
-const FREE = new Set([1, 2]);
+// Row H, seats 1 & 2 are free — physically adjacent and dead-centre under
+// centre-out numbering (see README's seat-numbering section), in a
+// mid-to-back row, i.e. the best pair in the house. Everything else is
+// "besetzt" (taken).
+const isFree = (row, label) => row === 'H' && (label === 1 || label === 2);
 
-const SEAT_ITEMS = SEAT_LABELS.map((label) => ({
-  seatId: `H-${label}`,
-  reihe: 'H',
-  platz: String(label),
-  seatStatus: FREE.has(label) ? 'frei' : 'besetzt',
-  preis: '12,50 €', // German decimal-comma formatting — money.js's other worked example
-  saal: 'Saal 3',
-}));
+const SEAT_ITEMS = ROWS.flatMap((row) =>
+  SEAT_LABELS.map((label) => ({
+    seatId: `${row}-${label}`,
+    reihe: row,
+    platz: String(label),
+    seatStatus: isFree(row, label) ? 'frei' : 'besetzt',
+    preis: '12,50 €', // German decimal-comma formatting — money.js's other worked example
+    saal: 'Saal 3',
+  })),
+);
 
 const SEED_PAYLOAD = { kinoprogramm: { saalplan: { sitze: SEAT_ITEMS } } };
 

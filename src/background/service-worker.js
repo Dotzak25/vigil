@@ -205,6 +205,13 @@ async function runWatcher(watcher, settings) {
       lastError: null,
       itemCount: items.length,
       lastHits: hits.length,
+      // Lifetime counters, so diagnose.js can tell "quiet because nothing
+      // changed" (the normal, healthy case) apart from "quiet because this
+      // watch is structurally incapable of firing" — which previously
+      // looked identical from the outside, forever.
+      runCount: (watcher.runCount || 0) + 1,
+      hitCount: (watcher.hitCount || 0) + hits.length,
+      lastHitAt: hits.length ? Date.now() : (watcher.lastHitAt || null),
       nextRunAt: schedule(watcher.intervalMin || settings.defaultIntervalMin),
     });
     if (watcher.templateKey) await Store.recordTemplateOutcome(watcher.templateKey, true);
