@@ -52,8 +52,14 @@ async function render() {
   const watchers = Object.values(await Store.watchers());
   const events = await Store.events();
 
-  // Arm control
+  // Arm control. "Arm" was never explained anywhere in the product — a
+  // bare button label with a static HTML tooltip as the only hint — so the
+  // title is set dynamically here to say what it actually does right now,
+  // not just what it's called.
   $('arm').textContent = settings.armed ? 'Disarm' : 'Arm';
+  $('arm').title = settings.armed
+    ? `Checking every ${settings.defaultIntervalMin}m by default. Click to stop.`
+    : 'Start checking your saved watches every few minutes. VIGIL only interrupts you when something actually changes.';
   $('arm').classList.toggle('primary', !settings.armed);
   $('arm').classList.toggle('ghost', settings.armed);
   $('pulse').classList.toggle('off', !settings.armed);

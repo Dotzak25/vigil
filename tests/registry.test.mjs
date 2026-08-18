@@ -93,6 +93,73 @@ describe('templateMatches / pickTemplate', () => {
   });
 });
 
+describe('identify() — per-domain currency/seat convention for multi-country chains', () => {
+  test('a chain with one domain per country reports the CORRECT country\'s currency, not always the first', () => {
+    // Regression: Cinema City is PL/CZ/HU/RO/BG/SK but only ever reported
+    // PLN — displayed directly in the confidence-building profile banner,
+    // and silently wrong for 5 of its 6 countries.
+    assert.deepEqual(
+      [identify('https://www.cinemacity.hu/x').currency, identify('https://cinemacity.cz/x').currency, identify('https://cinemacity.sk/x').currency],
+      ['HUF', 'CZK', 'EUR'],
+    );
+  });
+
+  test('Ireland is EUR, not GBP, for both ODEON and Cineworld', () => {
+    assert.equal(identify('https://odeon.ie/x').currency, 'EUR');
+    assert.equal(identify('https://cineworld.ie/x').currency, 'EUR');
+    assert.equal(identify('https://cineworld.co.uk/x').currency, 'GBP');
+  });
+
+  test('New Zealand is NZD, not AUD, across every AU/NZ chain', () => {
+    assert.equal(identify('https://eventcinemas.co.nz/x').currency, 'NZD');
+    assert.equal(identify('https://hoyts.co.nz/x').currency, 'NZD');
+    assert.equal(identify('https://readingcinemas.co.nz/x').currency, 'NZD');
+  });
+
+  test('Serbia is RSD, not EUR, for Cineplexx', () => {
+    assert.equal(identify('https://cineplexx.rs/x').currency, 'RSD');
+    assert.equal(identify('https://cineplexx.at/x').currency, 'EUR');
+  });
+
+  test('Cinépolis reports the right currency for each of its 4 distinct domains', () => {
+    assert.equal(identify('https://cinepolis.com/x').currency, 'MXN');
+    assert.equal(identify('https://cinepolis.com.br/x').currency, 'BRL');
+    assert.equal(identify('https://cinepolis.com.ar/x').currency, 'ARS');
+    assert.equal(identify('https://cinepolis.es/x').currency, 'EUR');
+  });
+
+  test('Kinepolis reports centre-out for BE/FR but sequential for ES/NL, within the same chain', () => {
+    assert.equal(identify('https://kinepolis.be/x').seat.numbering, 'centerout');
+    assert.equal(identify('https://kinepolis.fr/x').seat.numbering, 'centerout');
+    assert.equal(identify('https://kinepolis.es/x').seat.numbering, 'sequential');
+    assert.equal(identify('https://kinepolis.nl/x').seat.numbering, 'sequential');
+  });
+
+  test('a single-domain multi-country chain (VOX) has no per-domain signal to key off, and honestly falls back to the flat value', () => {
+    // Documents the known limitation rather than asserting a fixed
+    // behaviour would silently regress unnoticed.
+    const p = identify('https://voxcinemas.com/x');
+    assert.equal(p.country, 'AE');
+    assert.equal(p.currency, 'AED');
+  });
+});
+
+describe('identify() — Spain/Italy/Portugal/Netherlands are sequential, matching the README\'s own EU_CENTEROUT scope', () => {
+  test('standalone chains', () => {
+    assert.equal(identify('https://cinesa.es/x').seat.numbering, 'sequential');
+    assert.equal(identify('https://yelmocines.es/x').seat.numbering, 'sequential');
+    assert.equal(identify('https://ucicinemas.it/x').seat.numbering, 'sequential');
+    assert.equal(identify('https://thespacecinema.it/x').seat.numbering, 'sequential');
+    assert.equal(identify('https://cinemas.nos.pt/x').seat.numbering, 'sequential');
+    assert.equal(identify('https://pathe.nl/x').seat.numbering, 'sequential');
+  });
+
+  test('COUNTRY_DEFAULTS fallback (unknown chain, known TLD) agrees', () => {
+    assert.equal(identify('https://some-unlisted-cinema.es/x').seat.numbering, 'sequential');
+    assert.equal(identify('https://some-unlisted-cinema.nl/x').seat.numbering, 'sequential');
+  });
+});
+
 describe('templateKey / templateHealth', () => {
   test('key is stable and derived from host+urlPattern, not any feed-assigned id', () => {
     assert.equal(templateKey(baseTemplate()), 'www.cinestar.de|/api/showtime/{id}/seatplan');

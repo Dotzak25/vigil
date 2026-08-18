@@ -4,6 +4,7 @@ import { identify, toTemplate, pickTemplate, templateKey, templateHealth } from 
 import { describeGeometry, toMinimap } from '../core/seats.js';
 import { formatPrice } from '../core/money.js';
 import { FORMATS, formatLabel } from '../catalog/vocab.js';
+import { isPlausibleWebhookUrl } from '../core/webhook.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1037,6 +1038,7 @@ async function renderSettings() {
   $('sFrom').value = s.quietHours.from;
   $('sTo').value = s.quietHours.to;
   $('sSound').checked = s.sound;
+  $('sWebhook').value = s.webhookUrl || '';
 }
 
 function wireSettings() {
@@ -1046,13 +1048,19 @@ function wireSettings() {
     // hour that inQuietHours() (h >= 25 || h < to) can never match, and
     // clearing both fields (0/0) produced an empty-but-"enabled" window.
     const clampHour = (n) => Math.min(23, Math.max(0, Number(n) || 0));
+    const webhookUrl = $('sWebhook').value.trim();
+    if (webhookUrl && !isPlausibleWebhookUrl(webhookUrl)) {
+      say('That doesn\'t look like a webhook URL (needs to start with https://).', 'err');
+      return;
+    }
     await Store.saveSettings({
       defaultIntervalMin: Math.max(1, Number($('sInterval').value) || 5),
       sound: $('sSound').checked,
       quietHours: { enabled: $('sQuiet').checked, from: clampHour($('sFrom').value), to: clampHour($('sTo').value) },
+      webhookUrl,
     });
   };
-  ['sInterval', 'sQuiet', 'sFrom', 'sTo', 'sSound'].forEach((id) => $(id).addEventListener('change', save));
+  ['sInterval', 'sQuiet', 'sFrom', 'sTo', 'sSound', 'sWebhook'].forEach((id) => $(id).addEventListener('change', save));
 
   $('exportBackup')?.addEventListener('click', exportBackup);
   $('importBackupBtn')?.addEventListener('click', () => $('importBackup')?.click());

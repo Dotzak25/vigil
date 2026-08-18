@@ -11,9 +11,20 @@
  * "SOLD_OUT", "sold out" and "seatSoldOut" freely.
  */
 
-/** Strip diacritics so `disponível`, `disponible` and `ocupado` all normalise. */
+/**
+ * Strip diacritics so `disponivel`, `disponible` and `ocupado` all normalise.
+ *
+ * NFD decomposition handles accented letters (e with acute -> e + a
+ * combining mark, stripped below) but NOT letters that are structurally
+ * distinct rather than accented: Vietnamese d-with-stroke (dd/DD) and
+ * Turkish dotless i have no decomposition and pass straight through
+ * untouched. Real Vietnamese/Turkish text never matched this file's own
+ * Vietnamese/Turkish entries until these two were special-cased.
+ */
 export function fold(s) {
   return String(s)
+    .replace(/[\u0111\u0110]/g, 'd')
+    .replace(/\u0131/g, 'i')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -35,8 +46,13 @@ export const AVAILABLE = [
   'ledig', 'tillganglig', 'tilgjengelig', 'vapaa', 'saatavilla',
   // Polish / Czech / Slovak / Hungarian / Romanian
   'wolne', 'wolny', 'dostepne', 'volne', 'dostupne', 'szabad', 'elerheto', 'liber', 'disponibil',
-  // Greek / Turkish
-  'diathesimo', 'bos', 'musait',
+  // Greek / Turkish. The romanised Greek forms below never matched real
+  // payload text at all — Greek script doesn't transliterate to Latin under
+  // fold()'s NFD pipeline the way an accented Latin letter does. Both the
+  // romanisation and the actual Greek word are kept: the romanisation in
+  // case a site's own API renders it that way (real, if unlikely), the
+  // Greek script for real Greek-language sites.
+  'diathesimo', 'διαθέσιμο', 'bos', 'musait',
   // Russian / Ukrainian (folded Cyrillic is left as-is; compared directly)
   'свободно', 'свободен', 'доступно', 'вільно',
   // CJK
@@ -50,10 +66,22 @@ export const AVAILABLE = [
 ];
 
 export const UNAVAILABLE = [
-  // English
-  'sold', 'soldout', 'unavailable', 'taken', 'occupied', 'reserved', 'booked', 'held', 'blocked', 'broken', 'outofstock', 'no', 'false', 'unselectable', 'notavailable', 'house', 'companion',
-  // Spanish / Portuguese
-  'vendido', 'ocupado', 'agotado', 'nodisponible', 'reservado', 'esgotado', 'indisponivel',
+  // English. 'blocked' and 'companion' removed: both also appear in BLOCKED
+  // below, and classifyStatus checks UNAVAIL_SET first, so a wheelchair or
+  // companion seat literally labelled "blocked" was always read as ordinary
+  // sold inventory — meaning when the venue released the accessibility
+  // hold, it fired a restock/seat_block alert for a seat that was never
+  // actually purchasable. 'house' removed: too generic a single word for
+  // an availability signal, and a real collision risk against section
+  // names ("House Left/Right") via the substring fallback.
+  // 'inactive' added: without it, the substring fallback matched AVAILABLE's
+  // whole-token 'active' inside 'inactive' and read it backwards.
+  'sold', 'soldout', 'unavailable', 'taken', 'occupied', 'reserved', 'booked', 'held', 'broken', 'outofstock', 'no', 'false', 'unselectable', 'notavailable', 'inactive',
+  // Spanish / Portuguese. 'lotado' is Brazilian Portuguese for a sold-out
+  // house; feminine forms (ocupada/vendida/reservada) added because the
+  // substring fallback only catches a suffix GROWING, not a vowel changing,
+  // so "ocupada" was simply unmatched by "ocupado" without an entry of its own.
+  'vendido', 'ocupado', 'ocupada', 'agotado', 'nodisponible', 'reservado', 'reservada', 'esgotado', 'indisponivel', 'lotado', 'vendida',
   // French
   'vendu', 'occupe', 'complet', 'indisponible', 'reserve',
   // German / Dutch
@@ -64,16 +92,23 @@ export const UNAVAILABLE = [
   'upptagen', 'sald', 'slutsald', 'optaget', 'solgt', 'udsolgt', 'utsolgt', 'varattu', 'myyty', 'loppuunmyyty',
   // Polish / Czech / Slovak / Hungarian / Romanian
   'zajete', 'zajety', 'sprzedane', 'wyprzedane', 'obsazeno', 'prodano', 'vyprodano', 'foglalt', 'elkelt', 'ocupat', 'vandut',
-  // Greek / Turkish
-  'kateilimmeno', 'poulithike', 'dolu', 'satildi', 'tukendi', 'satilmis',
+  // Greek / Turkish — see the AVAILABLE list's comment: real Greek script
+  // added alongside the romanised forms, which never matched real text.
+  'kateilimmeno', 'κατειλημμένο', 'poulithike', 'πουλήθηκε', 'dolu', 'satildi', 'tukendi', 'satilmis',
   // Russian / Ukrainian
   'занято', 'продано', 'недоступно', 'зайнято',
-  // CJK
+  // CJK. Traditional Chinese added alongside simplified — '已預訂' was the
+  // only genuinely traditional entry before; the common Taiwan/HK "house
+  // full" terms (客滿 and friends) were entirely absent, affecting every
+  // TW/HK chain in the catalogue.
   '満席', '売切', '売り切れ', '販売終了', '予約済', '選択不可',
   '예매완료', '매진', '선택불가', '불가', '판매완료',
   '已售', '售罄', '已占', '不可选', '已售罄', '已預訂', '已订',
-  // South / Southeast Asia
-  'बुक', 'बिक', 'เต็ม', 'ขายแล้ว', 'จองแล้ว', 'daban', 'dadat', 'het', 'terjual', 'habis', 'dipesan', 'penuh',
+  '客滿', '已滿', '售完', '額滿', '爆滿',
+  // South / Southeast Asia. अनुपलब्ध (Hindi "not available") added — the
+  // negation, not a substring of उपलब्ध ("available") in AVAILABLE, so it
+  // was previously unreadable on both India-serving chains in the catalog.
+  'बुक', 'बिक', 'अनुपलब्ध', 'เต็ม', 'ขายแล้ว', 'จองแล้ว', 'daban', 'dadat', 'het', 'terjual', 'habis', 'dipesan', 'penuh',
   // Middle East
   'محجوز', 'مباع', 'غيرمتاح', 'תפוס', 'נמכר',
 ];
@@ -85,7 +120,10 @@ export const UNAVAILABLE = [
  * would fire on every single presale opening.
  */
 export const NOT_YET = [
-  'comingsoon', 'notonsale', 'presale', 'notyetavailable', 'pending', 'scheduled', 'upcoming',
+  // 'availablesoon' added: without a whole-token entry, "Available Soon"
+  // fell through to the substring pass and matched AVAILABLE's 'available'
+  // — read as on-sale right now, not "not yet".
+  'comingsoon', 'availablesoon', 'notonsale', 'presale', 'notyetavailable', 'pending', 'scheduled', 'upcoming',
   'proximamente', 'prochainement', 'demnachst', 'binnenkort', 'prossimamente', 'wkrotce',
   '近日', '発売前', '판매예정', '即将', 'segera',
 ];

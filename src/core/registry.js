@@ -32,14 +32,25 @@ import { detectFormats } from '../catalog/vocab.js';
 export function identify(url) {
   const chain = matchChain(url);
   if (chain) {
+    // Several chains genuinely operate across multiple countries with
+    // different currencies (and occasionally different seat conventions) —
+    // a single flat `currency`/`seat` was previously reported for EVERY
+    // country the chain serves, using only the first. Where the matched
+    // domain's position lines up with `countries` (true for every chain
+    // that ships a `currencies`/`seats` array), use the one for the
+    // ACTUAL domain the user is on instead.
+    const domainIndex = chain.domains.indexOf(chain.matchedDomain);
+    const country = (domainIndex !== -1 && chain.countries[domainIndex]) || chain.countries[0];
+    const currency = (chain.currencies && domainIndex !== -1 && chain.currencies[domainIndex]) || chain.currency;
+    const seat = (chain.seats && domainIndex !== -1 && chain.seats[domainIndex]) || chain.seat;
     return {
       kind: 'cinema',
       id: chain.id,
       name: chain.name,
-      currency: chain.currency,
+      currency,
       countries: chain.countries,
-      country: chain.countries[0],
-      seat: chain.seat,
+      country,
+      seat,
       formats: chain.formats || [],
       rtl: !!chain.rtl,
       aggregator: !!chain.aggregator,

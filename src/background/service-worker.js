@@ -12,6 +12,7 @@ import { diffItems, toSnapshot } from '../core/diff.js';
 import { evaluate } from '../core/rules.js';
 import { toMinimap } from '../core/seats.js';
 import { fetchTemplatePack, TEMPLATE_FEED } from '../core/registry.js';
+import { formatWebhookPayload } from '../core/webhook.js';
 
 const TICK = 'vigil:tick';
 const MAX_BACKOFF_MIN = 60;
@@ -295,7 +296,9 @@ async function announce(hits, settings) {
   // by tick() — setting it here per-watcher used to get silently
   // overwritten within the same second by tick()'s own refreshBadge() call
   // after the loop, so quiet-hours hits produced no visible signal at all
-  // beyond the event log.
+  // beyond the event log. A webhook is exactly as interruptive as the
+  // desktop notification it's an alternative to (it's what puts an alert on
+  // your phone via Discord), so it's held back the same way.
   if (inQuietHours(settings)) return;
 
   const top = hits.sort((a, b) => (b.priority || 0) - (a.priority || 0))[0];
@@ -309,6 +312,33 @@ async function announce(hits, settings) {
   });
 
   if (settings.sound && (top.priority ?? 1) >= 2) await playChime();
+
+  // Capped at 5 per sweep, same as newItemRule's own cap — a watcher with a
+  // lot of hits in one poll (many seats, many restocked sizes) shouldn't
+  // spam a Discord channel any harder than the desktop notification path.
+  for (const hit of hits.slice(0, 5)) await sendWebhook(hit, settings);
+}
+
+/**
+ * An optional second delivery channel straight from the browser — paste a
+ * Discord or Slack incoming-webhook URL into settings and every hit also
+ * posts there, no account or server involved. Competitive research found
+ * this specific gap repeatedly: paid Discord "cook groups" ($30-95/mo)
+ * largely sell delivery INTO Discord; almost no consumer monitoring tool
+ * ships it directly. A webhook failure must never block the desktop
+ * notification above it — it's a bonus channel, not the primary one.
+ */
+async function sendWebhook(hit, settings) {
+  if (!settings.webhookUrl) return;
+  try {
+    await fetch(settings.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formatWebhookPayload(hit)),
+    });
+  } catch {
+    /* best-effort — the desktop notification already fired */
+  }
 }
 
 async function notify({ title, body, priority = 1, url }) {

@@ -19,6 +19,9 @@ const DEFAULT_SETTINGS = {
   quietHours: { enabled: false, from: 1, to: 8 }, // local hours, 24h
   sound: true,
   maxEvents: 200,
+  // Optional: a Discord or Slack incoming-webhook URL. Empty means "off" —
+  // this never sends anywhere unless the user pastes a URL in themselves.
+  webhookUrl: '',
 };
 
 async function get(key, fallback) {

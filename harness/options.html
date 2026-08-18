@@ -105,7 +105,7 @@
     <div class="row" style="margin-top:12px">
       <button id="save" class="primary">Save watch</button>
       <button id="test">Test now</button>
-      <button id="exportT" class="ghost right">Export as template</button>
+      <button id="exportT" class="ghost right" title="Shares this SITE's shape (field mapping, seat convention) with other VIGIL users — not your data. Cookies, tokens and account details are stripped. For backing up your own watches, use Backup below instead.">Contribute this site's template</button>
     </div>
   </div>
 
@@ -124,12 +124,17 @@
     <label class="row" style="gap:6px"><input id="sQuiet" type="checkbox" style="width:auto" /> <span>Hold alerts during quiet hours</span></label>
     <label class="row" style="gap:6px"><input id="sSound" type="checkbox" style="width:auto" /> <span>Play a tone on urgent hits</span></label>
   </div>
+  <label style="margin-top:10px">
+    <span class="lab">Discord or Slack webhook (optional) — every hit also posts here, straight from your browser</span>
+    <input id="sWebhook" placeholder="https://discord.com/api/webhooks/..." />
+  </label>
 
   <hr />
   <p class="eyebrow">Backup</p>
   <p class="muted" style="margin-top:0">
     Everything VIGIL knows lives only in this browser profile — nothing syncs anywhere. Back it up before a
-    reinstall or a browser reset, or to move it to another machine.
+    reinstall or a browser reset, or to move it to another machine. This is different from "Contribute this
+    site's template" above, which shares a site's shape with other users, not your own watches.
   </p>
   <div class="row">
     <button id="exportBackup" class="ghost">Export all watches + history</button>

@@ -32,7 +32,23 @@ const EU_CENTEROUT = { numbering: 'centerout', rowOrder: 'front-first' };
 const SEQ = { numbering: 'sequential', rowOrder: 'front-first' };
 const AUTO = { numbering: 'auto', rowOrder: 'auto' };
 
-/** @type {Array} id, name, domains, countries, currency, formats, seat */
+/**
+ * @type {Array} id, name, domains, countries, currency, formats, seat
+ *
+ * A chain's `currency` (and `seat`) is a single flat value, but several
+ * chains genuinely operate across multiple currencies/conventions — one
+ * per country, not one for the whole chain. Where `domains` and
+ * `countries` line up positionally (domains[i] belongs to countries[i],
+ * which is true for every multi-country chain below except the ones noted),
+ * an optional `currencies`/`seats` array — same length, same order as
+ * `domains` — lets identify() (registry.js) pick the value for whichever
+ * domain actually matched, instead of always reporting the first country's
+ * currency for every country the chain serves. Without this, e.g. a
+ * Hungarian Cinema City user was told their currency was Polish złoty —
+ * displayed directly in the profile banner meant to build confidence, and
+ * a price_below/price_drop threshold set against the DISPLAYED currency
+ * would then never evaluate against the ACTUAL one.
+ */
 export const CHAINS = [
   // ---------- North America ----------
   { id: 'amc', name: 'AMC Theatres', domains: ['amctheatres.com'], countries: ['US'], currency: 'USD', formats: ['imax', 'imax70', 'imaxlaser', 'dolby', 'prime'], seat: SEQ },
@@ -52,8 +68,8 @@ export const CHAINS = [
   { id: 'atom', name: 'Atom Tickets (aggregator)', domains: ['atomtickets.com'], countries: ['US'], currency: 'USD', formats: ['imax', 'dolby'], seat: SEQ, aggregator: true },
 
   // ---------- UK & Ireland ----------
-  { id: 'odeon', name: 'ODEON', domains: ['odeon.co.uk', 'odeon.ie'], countries: ['GB', 'IE'], currency: 'GBP', formats: ['imax', 'imax70', 'dolby', 'icon'], seat: SEQ },
-  { id: 'cineworld', name: 'Cineworld', domains: ['cineworld.co.uk', 'cineworld.ie'], countries: ['GB', 'IE'], currency: 'GBP', formats: ['imax', 'imax70', '4dx', 'screenx', 'icon'], seat: SEQ },
+  { id: 'odeon', name: 'ODEON', domains: ['odeon.co.uk', 'odeon.ie'], countries: ['GB', 'IE'], currency: 'GBP', currencies: ['GBP', 'EUR'], formats: ['imax', 'imax70', 'dolby', 'icon'], seat: SEQ },
+  { id: 'cineworld', name: 'Cineworld', domains: ['cineworld.co.uk', 'cineworld.ie'], countries: ['GB', 'IE'], currency: 'GBP', currencies: ['GBP', 'EUR'], formats: ['imax', 'imax70', '4dx', 'screenx', 'icon'], seat: SEQ },
   { id: 'vue', name: 'Vue Cinemas', domains: ['myvue.com'], countries: ['GB', 'IE'], currency: 'GBP', formats: ['imax', 'icon'], seat: SEQ },
   { id: 'everyman', name: 'Everyman', domains: ['everymancinema.com'], countries: ['GB'], currency: 'GBP', formats: [], seat: SEQ },
   { id: 'picturehouse', name: 'Picturehouse', domains: ['picturehouses.com'], countries: ['GB'], currency: 'GBP', formats: ['film70'], seat: SEQ },
@@ -63,20 +79,29 @@ export const CHAINS = [
 
   // ---------- Western Europe ----------
   { id: 'pathe-fr', name: 'Pathé France', domains: ['pathe.fr', 'cinemaspathegaumont.com'], countries: ['FR'], currency: 'EUR', formats: ['imax', 'dolby', '4dx', 'screenx'], seat: EU_CENTEROUT },
-  { id: 'pathe-nl', name: 'Pathé Nederland', domains: ['pathe.nl'], countries: ['NL'], currency: 'EUR', formats: ['imax', 'dolby', '4dx'], seat: EU_CENTEROUT },
+  // NL/ES/IT/PT cinemas conventionally number sequentially, not centre-out —
+  // this file's own README-quoted scope for EU_CENTEROUT is German-speaking,
+  // Nordic, French and Central/Eastern European markets specifically, which
+  // doesn't include these four. They were previously tagged EU_CENTEROUT
+  // anyway, contradicting the project's own stated claim; seat.js's runtime
+  // detection and the minimap check catch a wrong hint, but a first-timer
+  // has no reason to doubt a hint that's simply wrong from the start.
+  { id: 'pathe-nl', name: 'Pathé Nederland', domains: ['pathe.nl'], countries: ['NL'], currency: 'EUR', formats: ['imax', 'dolby', '4dx'], seat: SEQ },
   { id: 'ugc', name: 'UGC', domains: ['ugc.fr', 'ugc.be'], countries: ['FR', 'BE'], currency: 'EUR', formats: ['imax', 'dolby'], seat: EU_CENTEROUT },
   { id: 'cgr', name: 'CGR Cinémas', domains: ['cgrcinemas.fr'], countries: ['FR'], currency: 'EUR', formats: ['icon'], seat: EU_CENTEROUT },
-  { id: 'kinepolis', name: 'Kinepolis', domains: ['kinepolis.be', 'kinepolis.fr', 'kinepolis.es', 'kinepolis.nl', 'kinepolis.lu'], countries: ['BE', 'FR', 'ES', 'NL', 'LU'], currency: 'EUR', formats: ['imax', '4dx', 'icon'], seat: EU_CENTEROUT },
+  // ES/NL differ in seat convention from BE/FR within this SAME chain — see
+  // the `seats` array note above the CHAINS declaration.
+  { id: 'kinepolis', name: 'Kinepolis', domains: ['kinepolis.be', 'kinepolis.fr', 'kinepolis.es', 'kinepolis.nl', 'kinepolis.lu'], countries: ['BE', 'FR', 'ES', 'NL', 'LU'], currency: 'EUR', formats: ['imax', '4dx', 'icon'], seat: EU_CENTEROUT, seats: [EU_CENTEROUT, EU_CENTEROUT, SEQ, SEQ, EU_CENTEROUT] },
   { id: 'cinestar-de', name: 'CineStar', domains: ['cinestar.de'], countries: ['DE'], currency: 'EUR', formats: ['imax', '4dx'], seat: EU_CENTEROUT },
   { id: 'cinemaxx', name: 'CinemaxX', domains: ['cinemaxx.de'], countries: ['DE'], currency: 'EUR', formats: ['dolby'], seat: EU_CENTEROUT },
   { id: 'uci-de', name: 'UCI Kinowelt', domains: ['uci-kinowelt.de'], countries: ['DE'], currency: 'EUR', formats: ['imax', 'dolby'], seat: EU_CENTEROUT },
-  { id: 'cineplexx', name: 'Cineplexx', domains: ['cineplexx.at', 'cineplexx.si', 'cineplexx.rs'], countries: ['AT', 'SI', 'RS'], currency: 'EUR', formats: ['imax', 'dolby', '4dx'], seat: EU_CENTEROUT },
+  { id: 'cineplexx', name: 'Cineplexx', domains: ['cineplexx.at', 'cineplexx.si', 'cineplexx.rs'], countries: ['AT', 'SI', 'RS'], currency: 'EUR', currencies: ['EUR', 'EUR', 'RSD'], formats: ['imax', 'dolby', '4dx'], seat: EU_CENTEROUT },
   { id: 'arena-ch', name: 'Arena / Blue Cinema', domains: ['arena.ch', 'bluecinema.ch'], countries: ['CH'], currency: 'CHF', formats: ['imax', '4dx'], seat: EU_CENTEROUT },
-  { id: 'cinesa', name: 'Cinesa', domains: ['cinesa.es'], countries: ['ES'], currency: 'EUR', formats: ['imax', 'dolby', '4dx'], seat: EU_CENTEROUT },
-  { id: 'yelmo', name: 'Yelmo Cines', domains: ['yelmocines.es'], countries: ['ES'], currency: 'EUR', formats: ['imax', '4dx'], seat: EU_CENTEROUT },
-  { id: 'uci-it', name: 'UCI Cinemas Italia', domains: ['ucicinemas.it'], countries: ['IT'], currency: 'EUR', formats: ['imax', '4dx'], seat: EU_CENTEROUT },
-  { id: 'thespace', name: 'The Space Cinema', domains: ['thespacecinema.it'], countries: ['IT'], currency: 'EUR', formats: ['imax', '4dx'], seat: EU_CENTEROUT },
-  { id: 'nos-pt', name: 'NOS Cinemas', domains: ['cinemas.nos.pt'], countries: ['PT'], currency: 'EUR', formats: ['imax', '4dx'], seat: EU_CENTEROUT },
+  { id: 'cinesa', name: 'Cinesa', domains: ['cinesa.es'], countries: ['ES'], currency: 'EUR', formats: ['imax', 'dolby', '4dx'], seat: SEQ },
+  { id: 'yelmo', name: 'Yelmo Cines', domains: ['yelmocines.es'], countries: ['ES'], currency: 'EUR', formats: ['imax', '4dx'], seat: SEQ },
+  { id: 'uci-it', name: 'UCI Cinemas Italia', domains: ['ucicinemas.it'], countries: ['IT'], currency: 'EUR', formats: ['imax', '4dx'], seat: SEQ },
+  { id: 'thespace', name: 'The Space Cinema', domains: ['thespacecinema.it'], countries: ['IT'], currency: 'EUR', formats: ['imax', '4dx'], seat: SEQ },
+  { id: 'nos-pt', name: 'NOS Cinemas', domains: ['cinemas.nos.pt'], countries: ['PT'], currency: 'EUR', formats: ['imax', '4dx'], seat: SEQ },
 
   // ---------- Nordics ----------
   { id: 'filmstaden', name: 'Filmstaden', domains: ['filmstaden.se'], countries: ['SE'], currency: 'SEK', formats: ['imax', '4dx'], seat: EU_CENTEROUT },
@@ -85,7 +110,7 @@ export const CHAINS = [
   { id: 'odeon-no', name: 'ODEON Norge', domains: ['odeonkino.no'], countries: ['NO'], currency: 'NOK', formats: ['imax'], seat: EU_CENTEROUT },
 
   // ---------- Central & Eastern Europe ----------
-  { id: 'cinemacity', name: 'Cinema City', domains: ['cinema-city.pl', 'cinemacity.cz', 'cinemacity.hu', 'cinemacity.ro', 'cinemacity.bg', 'cinemacity.sk'], countries: ['PL', 'CZ', 'HU', 'RO', 'BG', 'SK'], currency: 'PLN', formats: ['imax', '4dx', 'screenx', 'icon'], seat: EU_CENTEROUT },
+  { id: 'cinemacity', name: 'Cinema City', domains: ['cinema-city.pl', 'cinemacity.cz', 'cinemacity.hu', 'cinemacity.ro', 'cinemacity.bg', 'cinemacity.sk'], countries: ['PL', 'CZ', 'HU', 'RO', 'BG', 'SK'], currency: 'PLN', currencies: ['PLN', 'CZK', 'HUF', 'RON', 'BGN', 'EUR'], formats: ['imax', '4dx', 'screenx', 'icon'], seat: EU_CENTEROUT },
   { id: 'multikino', name: 'Multikino', domains: ['multikino.pl'], countries: ['PL'], currency: 'PLN', formats: ['imax'], seat: EU_CENTEROUT },
   { id: 'helios-pl', name: 'Helios', domains: ['helios.pl'], countries: ['PL'], currency: 'PLN', formats: ['dolby'], seat: EU_CENTEROUT },
   { id: 'cinamon', name: 'Cinamon / Forum Cinemas', domains: ['cinamonkino.com', 'forumcinemas.lv', 'forumcinemas.lt'], countries: ['EE', 'LV', 'LT'], currency: 'EUR', formats: ['4dx'], seat: EU_CENTEROUT },
@@ -118,21 +143,31 @@ export const CHAINS = [
   { id: 'sm-ph', name: 'SM Cinema', domains: ['smcinema.com'], countries: ['PH'], currency: 'PHP', formats: ['imax', 'dolby'], seat: AUTO },
 
   // ---------- Oceania ----------
-  { id: 'event-au', name: 'Event Cinemas', domains: ['eventcinemas.com.au', 'eventcinemas.co.nz'], countries: ['AU', 'NZ'], currency: 'AUD', formats: ['imax', 'imax70', '4dx', 'prime'], seat: SEQ },
-  { id: 'hoyts-au', name: 'HOYTS', domains: ['hoyts.com.au', 'hoyts.co.nz'], countries: ['AU', 'NZ'], currency: 'AUD', formats: ['dolby', 'xd', 'prime'], seat: SEQ },
+  { id: 'event-au', name: 'Event Cinemas', domains: ['eventcinemas.com.au', 'eventcinemas.co.nz'], countries: ['AU', 'NZ'], currency: 'AUD', currencies: ['AUD', 'NZD'], formats: ['imax', 'imax70', '4dx', 'prime'], seat: SEQ },
+  { id: 'hoyts-au', name: 'HOYTS', domains: ['hoyts.com.au', 'hoyts.co.nz'], countries: ['AU', 'NZ'], currency: 'AUD', currencies: ['AUD', 'NZD'], formats: ['dolby', 'xd', 'prime'], seat: SEQ },
   { id: 'village-au', name: 'Village Cinemas', domains: ['villagecinemas.com.au'], countries: ['AU'], currency: 'AUD', formats: ['imax', '4dx', 'prime'], seat: SEQ },
-  { id: 'reading-au', name: 'Reading Cinemas', domains: ['readingcinemas.com.au', 'readingcinemas.co.nz'], countries: ['AU', 'NZ'], currency: 'AUD', formats: ['prime'], seat: SEQ },
+  { id: 'reading-au', name: 'Reading Cinemas', domains: ['readingcinemas.com.au', 'readingcinemas.co.nz'], countries: ['AU', 'NZ'], currency: 'AUD', currencies: ['AUD', 'NZD'], formats: ['prime'], seat: SEQ },
   { id: 'palace-au', name: 'Palace Cinemas', domains: ['palacecinemas.com.au'], countries: ['AU'], currency: 'AUD', formats: [], seat: SEQ },
 
   // ---------- Latin America ----------
-  { id: 'cinepolis', name: 'Cinépolis', domains: ['cinepolis.com', 'cinepolis.com.br', 'cinepolis.com.ar', 'cinepolis.es'], countries: ['MX', 'BR', 'AR', 'ES', 'CO', 'PE', 'CL'], currency: 'MXN', formats: ['imax', '4dx', 'screenx', 'prime'], seat: AUTO },
+  // Only 4 domains for 7 countries — CO/PE/CL have no distinct Cinépolis
+  // domain in this catalogue at all, so they can never be the one that
+  // matches anyway; the currencies array below only needs to (and can only)
+  // cover the 4 domains that actually exist.
+  { id: 'cinepolis', name: 'Cinépolis', domains: ['cinepolis.com', 'cinepolis.com.br', 'cinepolis.com.ar', 'cinepolis.es'], countries: ['MX', 'BR', 'AR', 'ES', 'CO', 'PE', 'CL'], currency: 'MXN', currencies: ['MXN', 'BRL', 'ARS', 'EUR'], formats: ['imax', '4dx', 'screenx', 'prime'], seat: AUTO },
   { id: 'cinemex', name: 'Cinemex', domains: ['cinemex.com'], countries: ['MX'], currency: 'MXN', formats: ['imax', 'prime'], seat: AUTO },
   { id: 'cinemark-br', name: 'Cinemark Brasil', domains: ['cinemark.com.br'], countries: ['BR'], currency: 'BRL', formats: ['imax', 'xd', 'prime'], seat: AUTO },
   { id: 'kinoplex', name: 'Kinoplex', domains: ['kinoplex.com.br'], countries: ['BR'], currency: 'BRL', formats: ['imax'], seat: AUTO },
   { id: 'cinecolombia', name: 'Cine Colombia', domains: ['cinecolombia.com'], countries: ['CO'], currency: 'COP', formats: ['imax', '4dx'], seat: AUTO },
-  { id: 'cinemark-latam', name: 'Cinemark LatAm', domains: ['cinemark.com.ar', 'cinemark.cl', 'cinemark.com.pe', 'cinemark.com.co'], countries: ['AR', 'CL', 'PE', 'CO'], currency: 'ARS', formats: ['imax', 'xd'], seat: AUTO },
+  { id: 'cinemark-latam', name: 'Cinemark LatAm', domains: ['cinemark.com.ar', 'cinemark.cl', 'cinemark.com.pe', 'cinemark.com.co'], countries: ['AR', 'CL', 'PE', 'CO'], currency: 'ARS', currencies: ['ARS', 'CLP', 'PEN', 'COP'], formats: ['imax', 'xd'], seat: AUTO },
 
   // ---------- Middle East & Africa ----------
+  // vox/novo: a SINGLE domain covers every listed country (likely
+  // country-specific subpaths under one hostname, e.g. /uae/, /ksa/), so
+  // there's no domain-per-country signal to key a currency lookup off —
+  // unlike every chain above, this one can't be fixed by the currencies
+  // array mechanism. Left as a known, documented limitation rather than a
+  // silently-wrong per-country guess.
   { id: 'vox', name: 'VOX Cinemas', domains: ['voxcinemas.com'], countries: ['AE', 'SA', 'QA', 'BH', 'KW', 'OM', 'EG', 'LB'], currency: 'AED', formats: ['imax', '4dx', 'screenx', 'prime'], seat: AUTO, rtl: true },
   { id: 'reel', name: 'Reel Cinemas', domains: ['reelcinemas.ae'], countries: ['AE'], currency: 'AED', formats: ['dolby', 'prime'], seat: AUTO, rtl: true },
   { id: 'novo', name: 'Novo Cinemas', domains: ['novocinemas.com'], countries: ['AE', 'QA', 'BH'], currency: 'AED', formats: ['imax', '4dx'], seat: AUTO, rtl: true },
@@ -149,9 +184,13 @@ export const COUNTRY_DEFAULTS = {
   AU: { currency: 'AUD', seat: SEQ }, NZ: { currency: 'NZD', seat: SEQ },
   DE: { currency: 'EUR', seat: EU_CENTEROUT }, AT: { currency: 'EUR', seat: EU_CENTEROUT },
   CH: { currency: 'CHF', seat: EU_CENTEROUT }, FR: { currency: 'EUR', seat: EU_CENTEROUT },
-  NL: { currency: 'EUR', seat: EU_CENTEROUT }, BE: { currency: 'EUR', seat: EU_CENTEROUT },
-  ES: { currency: 'EUR', seat: EU_CENTEROUT }, IT: { currency: 'EUR', seat: EU_CENTEROUT },
-  PT: { currency: 'EUR', seat: EU_CENTEROUT }, PL: { currency: 'PLN', seat: EU_CENTEROUT },
+  // NL/ES/IT/PT: sequential, not centre-out — see the note by the chain
+  // entries above; these four are outside this project's own stated scope
+  // for EU_CENTEROUT (German-speaking, Nordic, French, Central/Eastern
+  // European).
+  NL: { currency: 'EUR', seat: SEQ }, BE: { currency: 'EUR', seat: EU_CENTEROUT },
+  ES: { currency: 'EUR', seat: SEQ }, IT: { currency: 'EUR', seat: SEQ },
+  PT: { currency: 'EUR', seat: SEQ }, PL: { currency: 'PLN', seat: EU_CENTEROUT },
   CZ: { currency: 'CZK', seat: EU_CENTEROUT }, SE: { currency: 'SEK', seat: EU_CENTEROUT },
   NO: { currency: 'NOK', seat: EU_CENTEROUT }, DK: { currency: 'DKK', seat: EU_CENTEROUT },
   FI: { currency: 'EUR', seat: EU_CENTEROUT }, JP: { currency: 'JPY', seat: AUTO },
@@ -161,7 +200,14 @@ export const COUNTRY_DEFAULTS = {
   ZA: { currency: 'ZAR', seat: AUTO }, SG: { currency: 'SGD', seat: AUTO },
 };
 
-/** Registrable-domain match, so `www.` and regional subdomains all resolve. */
+/**
+ * Registrable-domain match, so `www.` and regional subdomains all resolve.
+ * Returns the matched chain augmented with `matchedDomain` — which entry in
+ * its own `domains` array actually matched. registry.js uses that to look
+ * up the right entry in a chain's optional `currencies`/`seats` arrays
+ * (parallel to `domains`) for chains that genuinely vary by country, rather
+ * than always reporting the chain's single flat `currency`/`seat` value.
+ */
 export function matchChain(url) {
   let host;
   try {
@@ -170,7 +216,8 @@ export function matchChain(url) {
     return null;
   }
   for (const c of CHAINS) {
-    if (c.domains.some((d) => host === d || host.endsWith(`.${d}`))) return c;
+    const domain = c.domains.find((d) => host === d || host.endsWith(`.${d}`));
+    if (domain) return { ...c, matchedDomain: domain };
   }
   return null;
 }
