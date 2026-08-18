@@ -19,10 +19,19 @@ const TEMPLATE_FEED_TTL_MS = 12 * 60 * 60 * 1000; // 12h — this is a slow-movi
 
 /* ---------- lifecycle ---------- */
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   await chrome.alarms.create(TICK, { periodInMinutes: 1, delayInMinutes: 0.1 });
   await refreshBadge();
   await syncContentScripts();
+
+  // A fresh install drops straight into "pick a tab, start recording" with
+  // zero context on WHY — the README explains the actual problem (manual
+  // refreshing is a losing game against random-timed changes) at length,
+  // but nobody who installs from the Chrome Web Store ever reads the
+  // README. This is the one moment guaranteed to have the user's attention.
+  if (details.reason === 'install') {
+    await chrome.tabs.create({ url: chrome.runtime.getURL('src/ui/onboarding.html') });
+  }
 });
 
 chrome.runtime.onStartup.addListener(async () => {

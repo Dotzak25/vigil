@@ -66,7 +66,7 @@ async function render() {
     const empty = document.createElement('div');
     empty.className = 'empty';
     empty.innerHTML =
-      'Nothing on watch yet.<br><span class="muted">Open a seat map or product page, then add a watch.</span>';
+      'Nothing on watch yet.<br><span class="muted">Whatever you\'d refresh by hand — a seat map, a size, a price — VIGIL can watch instead.</span>';
     list.appendChild(empty);
   }
 

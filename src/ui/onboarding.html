@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VIGIL — before you start</title>
+  <link rel="stylesheet" href="ui.css" />
+  <style>
+    body { max-width: 640px; margin: 0 auto; padding: 56px 24px 80px; }
+    h1 { font-size: 26px; line-height: 1.25; margin: 0 0 18px; letter-spacing: -0.01em; }
+    .lede { font-size: 15px; color: var(--text); max-width: 56ch; }
+    .lede + .lede { margin-top: 14px; }
+    .reframe {
+      margin: 28px 0; padding: 16px 18px; border-radius: var(--r);
+      background: linear-gradient(90deg, #221c10, var(--panel) 65%);
+      border: 1px solid var(--signal-dim); font-size: 15px; font-weight: 500;
+    }
+    .reframe b { color: var(--signal); }
+    .steps { margin: 24px 0; padding: 0; list-style: none; }
+    .steps li { display: flex; gap: 14px; padding: 14px 0; border-top: 1px solid var(--edge); }
+    .steps li:first-child { border-top: none; }
+    .steps .n {
+      font-family: var(--mono); font-size: 11px; color: var(--signal); border: 1px solid var(--signal-dim);
+      border-radius: 50%; width: 22px; height: 22px; flex: none; display: flex; align-items: center;
+      justify-content: center; margin-top: 1px;
+    }
+    .steps .t { font-weight: 600; margin-bottom: 3px; }
+    .steps .d { color: var(--muted); font-size: 12.5px; }
+    .silence {
+      margin-top: 26px; padding: 12px 14px; border-radius: var(--r); border: 1px dashed var(--edge);
+      color: var(--muted); font-size: 12.5px;
+    }
+    .silence b { color: var(--text); }
+    .cta { margin-top: 32px; display: flex; gap: 10px; align-items: center; }
+    .skip { color: var(--muted); font-size: 12px; text-decoration: underline; cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
+    .skip:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+  <p class="eyebrow">Before you start</p>
+  <h1>The seat wasn't gone. You just weren't looking at the right second.</h1>
+
+  <p class="lede">
+    You checked. Sold out. You checked again an hour later — still sold out. So you gave up, the way anyone
+    reasonably would.
+  </p>
+  <p class="lede">
+    But a seat map, a restock, a resale price — none of them move on a schedule you could plan around. Someone
+    cancels at 11:04pm. A restock lands at a random minute nobody announced. A price dips for six hours before
+    it corrects itself. It doesn't show up when you happen to check. It shows up the instant someone else
+    happens to be looking — and they get it.
+  </p>
+
+  <div class="reframe">
+    That was never a "sold out" problem. It's a <b>timing</b> problem — and a computer that never gets bored
+    is better at timing than you are.
+  </div>
+
+  <p class="lede">VIGIL is the person who keeps looking after you've closed the tab.</p>
+
+  <ol class="steps">
+    <li>
+      <div class="n">1</div>
+      <div>
+        <div class="t">Show it the page, once</div>
+        <div class="d">Open the seat map, product page, or listing. Press record, reload, stop. VIGIL watches the page load its own data — it never guesses at an API, it just observes.</div>
+      </div>
+    </li>
+    <li>
+      <div class="n">2</div>
+      <div>
+        <div class="t">It keeps checking, quietly, forever</div>
+        <div class="d">Every few minutes, using your own logged-in session — exactly as if you'd left the tab open and reloaded it by hand, just without the hand.</div>
+      </div>
+    </li>
+    <li>
+      <div class="n">3</div>
+      <div>
+        <div class="t">You hear about it once, when it actually changes</div>
+        <div class="d">Not the whole seat map again — just what's different: which seats, which size, how much the price moved.</div>
+      </div>
+    </li>
+  </ol>
+
+  <div class="silence">
+    <b>The first check is always silent.</b> That's not a bug — VIGIL has to see the page once before it knows
+    what "unchanged" even looks like. Expect nothing for a while after that too. Silence just means nothing's
+    changed yet, and it's still watching.
+  </div>
+
+  <div class="cta">
+    <button id="start" class="primary">Set up your first watch</button>
+    <button class="skip" id="skip">I'll figure it out</button>
+  </div>
+
+  <script type="module" src="onboarding.js"></script>
+</body>
+</html>
