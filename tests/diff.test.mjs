@@ -72,6 +72,38 @@ describe('diffItems — every alert is a transition, never a level', () => {
   });
 });
 
+describe('toSnapshot / diffItems — hostile item ids from third-party payloads', () => {
+  test('an item whose id is "__proto__" is tracked normally instead of vanishing', () => {
+    const items = [item('__proto__', true, 'available', null), item('normal', true, 'available', null)];
+    const snap = toSnapshot(items);
+    assert.deepEqual(Object.keys(snap.items).sort(), ['__proto__', 'normal']);
+  });
+
+  test('a "__proto__" item does not corrupt lookups for other single-letter ids', () => {
+    // The snapshot's own field names are a/s/p/c/l. When "__proto__"
+    // poisoned the map's prototype, an item with id "a" resolved through it
+    // to a primitive, read as already-known, and its first appearance was
+    // never reported.
+    const prevSnap = toSnapshot([item('__proto__', true, 'available', null)]);
+    const { changes } = diffItems(prevSnap, [item('a', true, 'available', null)]);
+    assert.equal(changes.filter((c) => c.type === CHANGE.APPEARED && c.item.id === 'a').length, 1);
+  });
+
+  test('an id matching an Object.prototype member still reports as new (JSON-roundtripped snapshot)', () => {
+    // A snapshot read back from storage has an ordinary prototype again, so
+    // a bare lookup of "constructor" would inherit a function and read as
+    // already-known.
+    const stored = JSON.parse(JSON.stringify(toSnapshot([item('x', true, 'available', null)])));
+    const { changes } = diffItems(stored, [item('constructor', true, 'available', null)]);
+    assert.ok(changes.some((c) => c.type === CHANGE.APPEARED && c.item.id === 'constructor'));
+  });
+
+  test('numeric and string ids that collide after coercion are keyed consistently', () => {
+    const snap = toSnapshot([item(1, true, 'available', null), item('2', true, 'available', null)]);
+    assert.deepEqual(Object.keys(snap.items).sort(), ['1', '2']);
+  });
+});
+
 describe('median', () => {
   test('odd and even length arrays', () => {
     assert.equal(median([3, 1, 2]), 2);
@@ -109,5 +141,20 @@ describe('baselinePrice — the honest baseline for "dropped drastically"', () =
 
   test('empty series -> null', () => {
     assert.equal(baselinePrice([], 30, 'USD'), null);
+  });
+
+  test('with NO currency argument it still refuses to blend currencies — it uses the most recent one', () => {
+    // The old fallback used the whole mixed series, producing a baseline no
+    // real price would ever sit near: exactly the bogus "dropped
+    // drastically" this function exists to prevent.
+    const now = Date.now();
+    const series = [
+      { t: now - 4000, p: 9000, c: 'EUR' },
+      { t: now - 3000, p: 9500, c: 'EUR' },
+      { t: now - 2000, p: 20, c: 'USD' },
+      { t: now - 1000, p: 21, c: 'USD' },
+      { t: now, p: 20, c: 'USD' },
+    ];
+    assert.equal(baselinePrice(series, 30), 20, 'should use the current (USD) currency, not blend in EUR');
   });
 });

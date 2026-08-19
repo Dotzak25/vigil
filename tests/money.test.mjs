@@ -41,6 +41,64 @@ describe('parseAmount — the two README-cited off-by-1000x bugs', () => {
   });
 });
 
+describe('parseAmount — a string holding SEVERAL numbers must not weld them together', () => {
+  test('"from $12.99 to $19.99" reads the first price, not 129919.99', () => {
+    // The old cleaner deleted non-numeric characters from the whole string,
+    // so every number in it concatenated into one. Four orders of magnitude
+    // wrong, stored as a real observation, poisoning every later comparison.
+    assert.equal(parseAmount('from $12.99 to $19.99'), 12.99);
+  });
+
+  test('a hyphenated range "12-15" reads 12, not 1215', () => {
+    assert.equal(parseAmount('12-15'), 12);
+  });
+
+  test('a bare percentage is not a price', () => {
+    assert.equal(parseAmount('20% off'), null);
+  });
+
+  test('but a real price that merely mentions a percentage still parses, and is not negative', () => {
+    // "(...)" only means a negative when it wraps the WHOLE value.
+    assert.equal(parseAmount('$20 (20% off)'), 20);
+  });
+
+  test('space-grouped thousands still parse as one number', () => {
+    assert.equal(parseAmount('1 234 567,89'), 1234567.89);
+  });
+
+  test('multi-group separators of both kinds', () => {
+    assert.equal(parseAmount('1.234.567,89'), 1234567.89);
+    assert.equal(parseAmount('12,345,678'), 12345678);
+  });
+
+  test('Indian lakh grouping (2-2-3, not 3-3-3)', () => {
+    assert.equal(parseAmount('1,23,456.78'), 123456.78);
+  });
+});
+
+describe('detectCurrency — a letter code must be its own word', () => {
+  test('"unknown" does not mean Croatian Kuna', () => {
+    // 'kn' sat inside an ordinary English word. The false currency then
+    // feeds the never-compare-across-currencies guard and can silently
+    // suppress a real price alert.
+    assert.equal(detectCurrency('This is an unknown product'), null);
+    assert.equal(detectCurrency('banknote value'), null);
+    assert.equal(detectCurrency('acknowledge'), null);
+  });
+
+  test('the genuine standalone codes still resolve', () => {
+    assert.equal(detectCurrency('kn 100'), 'HRK');
+    assert.equal(detectCurrency('lei 50'), 'RON');
+    assert.equal(detectCurrency('RM 30'), 'MYR');
+    assert.equal(detectCurrency('Rp 55.000'), 'IDR');
+    assert.equal(detectCurrency('CHF 20'), 'CHF');
+  });
+
+  test('"R$" wins over bare "R" for Brazilian prices', () => {
+    assert.equal(detectCurrency('R$ 55,00'), 'BRL');
+  });
+});
+
 describe('detectCurrency', () => {
   test('unambiguous symbols map directly', () => {
     assert.equal(detectCurrency('1.234,56 €'), 'EUR');

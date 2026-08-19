@@ -39,14 +39,35 @@ export function detectCurrency(raw, countryHint) {
   if (iso) return iso[1].toUpperCase();
 
   for (const [sym, code] of SYMBOLS) {
-    if (s.includes(sym)) return code;
+    if (symbolPresent(s, sym)) return code;
   }
   for (const [sym, byCountry] of Object.entries(AMBIGUOUS)) {
-    if (s.includes(sym)) {
+    if (symbolPresent(s, sym)) {
       return byCountry[countryHint] || byCountry[Object.keys(byCountry)[0]];
     }
   }
   return null;
+}
+
+/**
+ * A letter-based currency code must stand as its own word. A plain
+ * `includes` matched "kn" inside the ordinary English word "unknown" and
+ * confidently reported Croatian Kuna for a page with no currency on it at
+ * all — which then feeds the never-compare-across-currencies guard and can
+ * silently suppress a real price alert. Symbols made of punctuation
+ * (currency signs) have no such ambiguity and are matched as-is.
+ *
+ * Matching stays case-SENSITIVE on purpose: it is what keeps "lei" (RON)
+ * from firing on "Leisure" and "Rp" (IDR) from firing on "Corporate report".
+ */
+function symbolPresent(s, sym) {
+  if (!/^[A-Za-z]+$/.test(sym)) return s.includes(sym);
+  const i = s.indexOf(sym);
+  if (i === -1) return false;
+  const before = s[i - 1];
+  const after = s[i + sym.length];
+  const isLetter = (ch) => ch != null && /[A-Za-z]/.test(ch);
+  return !isLetter(before) && !isLetter(after);
 }
 
 /**
@@ -61,13 +82,40 @@ export function parseAmount(raw) {
   let s = String(raw).trim();
   if (!s) return null;
 
-  const negative = /^-|\(.*\)$/.test(s);
+  // Accounting-style negatives wrap the WHOLE value in parentheses. The
+  // anchor matters: without it, any string merely ending in ")" counted as
+  // negative, so "$20 (20% off)" parsed as -20.
+  const negative = /^-/.test(s) || /^\(.*\)$/.test(s);
 
-  // Keep digits and separators only. Non-breaking and thin spaces are used as
-  // thousands separators across Europe, so they count as separators too.
+  // Non-breaking and thin spaces are used as thousands separators across
+  // Europe, so they count as separators too.
   s = s.replace(/[\u00A0\u202F\u2009]/g, ' ');
-  const cleaned = s.replace(/[^\d.,\s]/g, '').trim();
-  if (!/\d/.test(cleaned)) return null;
+
+  // Everything that isn't a digit or a separator becomes a SPACE, not
+  // nothing. This is the difference between reading one number and welding
+  // several together: deleting the non-numeric characters from
+  // "from $12.99 to $19.99" left "12.99  19.99", whose digits then
+  // concatenated into 129919.99 \u2014 a price four orders of magnitude too
+  // large, silently stored as a real observation and poisoning every
+  // future comparison against it. "12-15" became 1215 the same way.
+  const spaced = s.replace(/[^\d.,\s]/g, ' ');
+  if (!/\d/.test(spaced)) return null;
+
+  // A numeric run is digits joined by single separators. A SPACE only
+  // continues the run when it's followed by exactly three digits \u2014 that's
+  // a thousands group ("1 234 567"). Any other spacing ends the run, which
+  // is what keeps a range like "12-15" from reading as 1215 once the
+  // hyphen has become a space.
+  const runs = [...spaced.matchAll(/\d+(?:[.,]\d+|\s\d{3}(?!\d))*/g)];
+  if (!runs.length) return null;
+
+  // Skip a run that is immediately a percentage ("20% off") \u2014 that is a
+  // discount, not a price, and reading it as one is how a promo badge
+  // becomes a fabricated observation.
+  const chosen = runs.find((m) => s[m.index + m[0].length] !== '%') || null;
+  if (!chosen) return null;
+
+  const cleaned = chosen[0].trim();
 
   const lastComma = cleaned.lastIndexOf(',');
   const lastDot = cleaned.lastIndexOf('.');

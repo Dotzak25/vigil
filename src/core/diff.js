@@ -18,9 +18,21 @@ export const CHANGE = {
 };
 
 export function toSnapshot(items) {
-  const map = {};
+  // Null-prototype, because item ids come from arbitrary third-party
+  // payloads and a plain {} makes some of them magic. An item whose id was
+  // literally "__proto__" did not become an own key at all — the bracket
+  // assignment hit Object.prototype's accessor and REPLACED the map's
+  // prototype with that item's data. The item then vanished from tracking
+  // silently, and because its fields are named a/s/p/c/l, any later item
+  // whose id happened to be "a" or "p" resolved through the poisoned
+  // prototype to a primitive, so diffItems saw it as already-known and
+  // never reported it as new. No error was thrown anywhere.
+  const map = Object.create(null);
   for (const it of items) {
-    map[it.id] = {
+    // Ids are coerced to strings by object keying regardless; doing it
+    // explicitly means a numeric 1 and a string "1" collide visibly here
+    // rather than one silently overwriting the other later.
+    map[String(it.id)] = {
       a: it.available,
       s: it.status,
       p: it.price?.amount ?? null,
@@ -41,9 +53,18 @@ export function diffItems(prev, items) {
   const changes = [];
   const seen = new Set();
 
+  // A snapshot read back from storage has been through JSON, so it has an
+  // ordinary prototype again. Looking an id up on it directly would let an
+  // item whose id is "constructor" (or any other Object.prototype member)
+  // resolve to an inherited value instead of undefined — the item reads as
+  // already-known and its first appearance is never reported. Only own
+  // properties count as "seen before".
+  const prevItems = prev.items || {};
+  const lookup = (id) => (Object.prototype.hasOwnProperty.call(prevItems, id) ? prevItems[id] : undefined);
+
   for (const it of items) {
-    seen.add(it.id);
-    const before = prev.items[it.id];
+    seen.add(String(it.id));
+    const before = lookup(String(it.id));
 
     if (!before) {
       changes.push({ type: CHANGE.APPEARED, item: it });
@@ -76,9 +97,9 @@ export function diffItems(prev, items) {
     }
   }
 
-  for (const id of Object.keys(prev.items)) {
+  for (const id of Object.keys(prevItems)) {
     if (!seen.has(id)) {
-      changes.push({ type: CHANGE.VANISHED, item: { id, label: prev.items[id].l } });
+      changes.push({ type: CHANGE.VANISHED, item: { id, label: lookup(id)?.l } });
     }
   }
 
@@ -102,7 +123,16 @@ export function median(nums) {
 export function baselinePrice(series, windowDays = 30, currency = null) {
   if (!series?.length) return null;
 
-  const sameCcy = currency ? series.filter((x) => !x.c || x.c === currency) : series;
+  // When the caller can't supply a currency (detection failed on the
+  // current price), fall back to the most recent point's currency rather
+  // than to "everything". The old fallback silently blended every currency
+  // the item had ever been priced in into one median — for a series that
+  // switched locale, that produces a baseline no real price will ever sit
+  // near, which is exactly the bogus "dropped drastically" this function's
+  // own doc comment says it exists to prevent.
+  const effective = currency || [...series].reverse().find((x) => x.c)?.c || null;
+
+  const sameCcy = effective ? series.filter((x) => !x.c || x.c === effective) : series;
   if (!sameCcy.length) return null;
 
   const cutoff = Date.now() - windowDays * 864e5;
