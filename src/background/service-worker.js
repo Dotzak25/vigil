@@ -125,9 +125,22 @@ async function tick() {
     let quietHits = 0;
 
     // Never fire two sites in the same millisecond; stagger politely.
+    //
+    // Each watcher is isolated: runWatcher already handles its OWN network
+    // and parse failures, but a throw from anything outside that (a storage
+    // write rejecting on quota, most realistically) would otherwise abort
+    // the entire sweep on the first watcher and silently strand every
+    // remaining one — every tick after it repeating the same abort, with
+    // the toolbar badge still reporting a healthy armed count. One bad
+    // watcher must never take the other 29 down with it.
     for (const w of due) {
-      const result = await runWatcher(w, settings);
-      if (result.quiet) quietHits += result.hitCount;
+      try {
+        const result = await runWatcher(w, settings);
+        if (result.quiet) quietHits += result.hitCount;
+      } catch (err) {
+        console.error('VIGIL: watcher failed outside its own error handling', w?.id, err);
+        await reportStorageTrouble(err);
+      }
       await sleep(400 + Math.random() * 600);
     }
 
@@ -168,12 +181,23 @@ async function runWatcher(watcher, settings) {
     const prev = await Store.snapshot(watcher.id);
     const { changes, firstRun } = diffItems(prev, items);
 
-    // Single batched read-modify-write for this whole poll's history,
-    // instead of one per item — and prunes ids no longer in the listing,
-    // so a large seat map's history doesn't grow without bound. Record
-    // before evaluating, so the median includes today.
-    await Store.syncHistory(watcher.id, items);
-    const history = await Store.history(watcher.id);
+    // Price history is ONLY worth storing if a rule actually consults it.
+    // It used to be recorded unconditionally, which is what made storage a
+    // ticking clock: a seat map carries a price on every seat, and
+    // suggestFields maps a price field automatically, so a 2,000-seat
+    // cinema watcher — the headline use case, with only seat rules that
+    // never look at price — accumulated ~19MB of history against a 10MB
+    // quota, hitting the ceiling in about half a day. A seat watcher now
+    // stores no history at all, and syncHistory's own per-watcher ceiling
+    // bounds the legitimate price-watching case.
+    const needsHistory = (watcher.rules || []).some(
+      (r) => r.type === 'price_drop' || r.type === 'price_below' || r.type === 'price_range'
+    );
+    let history = {};
+    if (needsHistory) {
+      await Store.syncHistory(watcher.id, items);
+      history = await Store.history(watcher.id);
+    }
 
     const hits = evaluate({ watcher, items, changes, firstRun, history });
     hitCount = hits.length;
@@ -399,6 +423,36 @@ async function refreshBadge() {
   const watchers = Object.values(await Store.watchers()).filter((w) => w.enabled !== false);
   await chrome.action.setBadgeBackgroundColor({ color: armed ? '#E8A33D' : '#3A4453' });
   await chrome.action.setBadgeText({ text: armed && watchers.length ? String(watchers.length) : '' });
+}
+
+/**
+ * Storage running out is the one failure that can silently stop EVERYTHING
+ * — it's not a per-watcher fault, it's the whole extension losing its
+ * ability to record anything. It must never present as a quiet slowdown,
+ * which is exactly how it presented before: the badge kept showing a
+ * healthy armed count while every sweep aborted, and the only symptom was
+ * "Last sweep 2d ago" buried in the popup.
+ *
+ * Deliberately loud, deliberately once — a persistent badge plus a single
+ * notification per browser session, tracked in session storage so a
+ * worker restart doesn't re-nag.
+ */
+async function reportStorageTrouble(err) {
+  const msg = String(err?.message || err);
+  if (!/quota|QUOTA|storage/i.test(msg)) return;
+
+  await chrome.action.setBadgeBackgroundColor({ color: '#d9695f' });
+  await chrome.action.setBadgeText({ text: '!' });
+
+  const { storageWarned } = await chrome.storage.session.get('storageWarned');
+  if (storageWarned) return;
+  await chrome.storage.session.set({ storageWarned: true });
+
+  await notify({
+    title: 'VIGIL has run out of storage',
+    body: 'Checking has stopped. Delete a watch you no longer need, or clear old hits, to free space.',
+    priority: 2,
+  });
 }
 
 /* ---------- template feed ---------- */

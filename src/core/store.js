@@ -50,6 +50,16 @@ async function set(obj) {
  * dies, whatever was "in flight" is gone anyway, so an empty lock map on
  * restart is exactly the correct starting state, not a bug.
  */
+/**
+ * Ceiling on distinct items carrying a price series, per watcher.
+ * chrome.storage.local is 10MB and the manifest doesn't request
+ * unlimitedStorage; one history point serialises to ~39 bytes, so
+ * 300 items x 240 points is roughly 2.8MB worst case for a single
+ * watcher — large, but survivable alongside others, where the previous
+ * unbounded behaviour was not.
+ */
+const MAX_TRACKED_PRICE_ITEMS = 300;
+
 const locks = new Map();
 function withLock(key, fn) {
   const prev = locks.get(key) || Promise.resolve();
@@ -174,23 +184,51 @@ export const Store = {
    * SPECIFIC item id against its own series, and there's no current price
    * left to compare it to.
    */
-  async syncHistory(id, items, cap = 240) {
+  async syncHistory(id, items, cap = 240, maxTrackedItems = MAX_TRACKED_PRICE_ITEMS) {
     return withLock(`hist:${id}`, async () => {
       const hist = await get(`hist:${id}`, {});
       const now = Date.now();
       const seen = new Set();
 
+      // A hard per-watcher ceiling on how many DISTINCT items carry a price
+      // series. The per-item `cap` alone bounds each series but not their
+      // number, so a listing with thousands of priced rows still multiplies
+      // out past the whole extension's storage quota. Cheapest items first:
+      // a price watcher cares about the bottom of the market, so if a
+      // listing is too big to track entirely, the cheap end is the half
+      // worth keeping.
+      const priced = items
+        .filter((it) => it.price?.amount != null)
+        .sort((a, b) => a.price.amount - b.price.amount)
+        .slice(0, maxTrackedItems);
+
+      const tracked = new Set(priced.map((it) => it.id));
+
+      // Priced items that lost the ceiling contest. An item that is present
+      // but currently has NO price is deliberately not in here: it keeps
+      // whatever history it already had, because a listing showing no price
+      // right now (sold out, between drops) is exactly when its past prices
+      // matter most. Its series isn't growing, so keeping it is bounded.
+      const excluded = new Set();
       for (const it of items) {
         seen.add(it.id);
-        if (it.price?.amount == null) continue;
+        if (it.price?.amount != null && !tracked.has(it.id)) excluded.add(it.id);
+      }
+
+      for (const it of priced) {
         const series = hist[it.id] || [];
         series.push({ t: now, p: it.price.amount, c: it.price.currency || null });
         hist[it.id] = series.slice(-cap);
       }
 
       for (const itemId of Object.keys(hist)) {
-        if (!seen.has(itemId)) delete hist[itemId];
+        if (!seen.has(itemId) || excluded.has(itemId)) delete hist[itemId];
       }
+
+      // Absolute backstop, in case a listing churns unpriced items faster
+      // than the rules above shed them.
+      const keys = Object.keys(hist);
+      for (const k of keys.slice(maxTrackedItems)) delete hist[k];
 
       await set({ [`hist:${id}`]: hist });
     });

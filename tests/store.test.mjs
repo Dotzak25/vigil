@@ -142,6 +142,44 @@ describe('Store.saveWatcher / patchWatcher — the concurrency regression', () =
   });
 });
 
+describe('Store.syncHistory — the storage-quota ceiling', () => {
+  test('tracks at most maxTrackedItems distinct priced items, keeping the CHEAPEST', async () => {
+    // A price watcher cares about the bottom of the market, so when a
+    // listing is too big to track in full, the cheap end is the half worth
+    // keeping. Unbounded tracking here is what could exhaust the whole
+    // extension's 10MB quota from one large watcher.
+    const items = Array.from({ length: 50 }, (_, i) => ({
+      id: `item-${i}`, price: { amount: 1000 - i, currency: 'USD' }, // item-49 is cheapest
+    }));
+    await Store.syncHistory('big', items, 240, 10);
+    const hist = await Store.history('big');
+    const keys = Object.keys(hist);
+    assert.equal(keys.length, 10, 'must not exceed the ceiling');
+    assert.ok(keys.includes('item-49'), 'the cheapest item must be tracked');
+    assert.ok(!keys.includes('item-0'), 'the most expensive item must be dropped past the ceiling');
+  });
+
+  test('a huge listing cannot grow history without bound across repeated polls', async () => {
+    const mk = (n, offset) => Array.from({ length: n }, (_, i) => ({
+      id: `x-${i + offset}`, price: { amount: 10 + i, currency: 'USD' },
+    }));
+    // Three polls, each showing a completely DIFFERENT set of 100 items —
+    // the churn case that previously accumulated every id ever seen.
+    await Store.syncHistory('churn', mk(100, 0), 240, 20);
+    await Store.syncHistory('churn', mk(100, 1000), 240, 20);
+    await Store.syncHistory('churn', mk(100, 2000), 240, 20);
+    const hist = await Store.history('churn');
+    assert.ok(Object.keys(hist).length <= 20, `expected <= 20 tracked ids, got ${Object.keys(hist).length}`);
+  });
+
+  test('an item still listed but temporarily unpriced KEEPS its history — that is when past prices matter most', async () => {
+    await Store.syncHistory('w9', [{ id: 'a', price: { amount: 10, currency: 'USD' } }], 240, 5);
+    await Store.syncHistory('w9', [{ id: 'a', price: null }], 240, 5); // sold out, no price shown
+    const hist = await Store.history('w9');
+    assert.equal(hist.a.length, 1, 'history must survive a period with no listed price');
+  });
+});
+
 describe('Store.syncHistory — batched write + pruning of vanished item ids', () => {
   test('writes all items in a single call and prunes ids no longer present', async () => {
     await Store.syncHistory('w', [
