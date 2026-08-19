@@ -32,6 +32,16 @@ window.addEventListener('message', (ev) => {
   if (ev.data?.source !== '__VIGIL_CAPTURE__') return;
   if (!recording) return;
 
+  // A live-transport notice carries no payload — it only reports that this
+  // page pushes data over a connection VIGIL cannot replay, so the picker
+  // can explain the real reason nothing was captured.
+  if (ev.data.liveTransport) {
+    chrome.runtime
+      .sendMessage({ type: 'vigil:liveTransport', info: ev.data.liveTransport })
+      .catch(() => {});
+    return;
+  }
+
   chrome.runtime
     .sendMessage({ type: 'vigil:capture', capture: { ...ev.data.payload, pageUrl: location.href, title: document.title } })
     .catch(() => {});

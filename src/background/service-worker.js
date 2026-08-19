@@ -519,6 +519,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         await setRecordingTabs(new Set([msg.tabId]));
         await Store.clearCaptures();
+        await chrome.storage.session.remove('liveTransports');
         // Ensure the content scripts are actually registered for this
         // origin before responding — options.js decides whether to reload
         // the tab based on this call succeeding, and syncContentScripts()
@@ -534,7 +535,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         tabs.delete(msg.tabId);
         await setRecordingTabs(tabs);
         await chrome.tabs.sendMessage(msg.tabId, { type: 'vigil:setRecording', recording: false }).catch(() => {});
-        return sendResponse({ ok: true, captures: await Store.captures() });
+        const { liveTransports = [] } = await chrome.storage.session.get('liveTransports');
+        return sendResponse({ ok: true, captures: await Store.captures(), liveTransports });
       }
 
       case 'vigil:capture': {
@@ -549,6 +551,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const tabs = await getRecordingTabs();
         if (!tabs.has(sender.tab?.id)) return sendResponse({ ok: false, error: 'not recording' });
         await Store.pushCapture(msg.capture);
+        return sendResponse({ ok: true });
+      }
+
+      case 'vigil:liveTransport': {
+        // Recorded per session (not persisted): the picker only needs it to
+        // explain THIS recording attempt.
+        const tabs = await getRecordingTabs();
+        if (!tabs.has(sender.tab?.id)) return sendResponse({ ok: false });
+        const { liveTransports = [] } = await chrome.storage.session.get('liveTransports');
+        if (!liveTransports.some((t) => t.kind === msg.info.kind)) {
+          liveTransports.push(msg.info);
+          await chrome.storage.session.set({ liveTransports });
+        }
         return sendResponse({ ok: true });
       }
 

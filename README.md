@@ -150,6 +150,8 @@ The median matters. Comparing to yesterday flags noise; comparing to the last 30
 
 **Server-rendered pages have no request to record.** If seats arrive as HTML with no XHR, there's nothing to capture yet.
 
+**Live-streamed seat maps can't be watched at all.** Some high-demand venues push seat state over a WebSocket or an event stream rather than a request — often the very ones with live seat-locking, which is exactly the case you'd most want covered. There is no request to replay, and an MV3 service worker (killed after ~30s idle) can't hold a connection open, so this isn't a matter of trying harder. VIGIL now *detects* it and says so plainly during setup instead of blaming the wrong thing; fixing it properly needs the Phase 2 backend.
+
 **Arena seating is scored as a room, not a venue.** Sections are kept separate so blocks never span them, but "how good is section 112 vs 320" needs stage-distance modelling that isn't built.
 
 **Chain profiles are unverified against live sites.** Domains, currencies and formats are from general knowledge; the seat-numbering values are *hints* that runtime detection and your own eyes override. Treat a fresh chain profile as a starting guess, not a fact.

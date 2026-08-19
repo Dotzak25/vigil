@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>recorder: live-transport detection</title>
+</head>
+<body>
+<h1>Live-transport detection check</h1>
+<pre id="out">running…</pre>
+<script>
+  // Stand in for the isolated-world bridge: collect what recorder.js posts.
+  const seen = [];
+  window.addEventListener('message', (ev) => {
+    if (ev.data?.source === '__VIGIL_CAPTURE__' && ev.data.liveTransport) seen.push(ev.data.liveTransport);
+  });
+</script>
+<!-- The real recorder, unmodified, exactly as the extension injects it. -->
+<script src="../src/content/recorder.js"></script>
+<script>
+  (async () => {
+    const log = [];
+
+    // 1. A WebSocket must be detected, and must still construct and work.
+    let wsWorked = false;
+    try {
+      const ws = new WebSocket('wss://echo.websocket.org');
+      wsWorked = ws instanceof WebSocket;   // prototype chain preserved?
+      log.push('WebSocket instanceof preserved: ' + wsWorked);
+      log.push('WebSocket.OPEN constant preserved: ' + (WebSocket.OPEN === 1));
+      ws.close();
+    } catch (e) {
+      log.push('WebSocket construction THREW: ' + e.message);
+    }
+
+    // 2. An EventSource must be detected, and must still construct.
+    try {
+      const es = new EventSource('/nope-sse');
+      log.push('EventSource instanceof preserved: ' + (es instanceof EventSource));
+      es.close();
+    } catch (e) {
+      log.push('EventSource construction THREW: ' + e.message);
+    }
+
+    await new Promise((r) => setTimeout(r, 100));
+    log.push('--- detected transports: ' + JSON.stringify(seen.map((s) => s.kind)));
+    document.getElementById('out').textContent = log.join('\n');
+    window.__result = { log, seen };
+  })();
+</script>
+</body>
+</html>

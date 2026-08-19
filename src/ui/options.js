@@ -253,7 +253,7 @@ $('stop').addEventListener('click', async () => {
   $('stop').disabled = true;
   try {
     const res = await chrome.runtime.sendMessage({ type: 'vigil:stopRecording', tabId: state.recordingTabId });
-    renderCaptures(res?.captures || []);
+    renderCaptures(res?.captures || [], res?.liveTransports || []);
   } catch (e) {
     say(`Couldn't stop recording cleanly: ${e?.message || e} — try again, or reload this page.`, 'err');
   } finally {
@@ -263,7 +263,7 @@ $('stop').addEventListener('click', async () => {
 
 /* ---------- step 2: rank and pick ---------- */
 
-function renderCaptures(caps) {
+function renderCaptures(caps, liveTransports = []) {
   const box = $('caps');
   box.textContent = '';
 
@@ -296,8 +296,26 @@ function renderCaptures(caps) {
     .sort((a, b) => b.score - a.score);
 
   if (!scored.length) {
+    // Say the RIGHT reason. A page that pushes its data over a WebSocket or
+    // an EventSource produces no replayable request at all, and telling
+    // that user "some sites render seats on the server" sends them hunting
+    // for a mistake they did not make. VIGIL genuinely cannot watch these
+    // yet — an MV3 service worker is killed after ~30s idle and cannot hold
+    // a live connection open — and saying so plainly is worth more than a
+    // vague suggestion to try again.
+    const live = liveTransports.find((t) => t.kind === 'websocket') || liveTransports[0];
+    if (live) {
+      const label = live.kind === 'websocket' ? 'a live WebSocket connection' : 'a live server-sent event stream';
+      box.innerHTML = `<div class="empty">This page streams its data over ${esc(label)} rather than
+        loading it as a request VIGIL can replay. That's common on seat maps with live seat-locking.<br><br>
+        <span class="muted">VIGIL can't watch these yet, and re-recording won't change it — a background worker
+        can't hold a live connection open. If the site also has a plain page (a non-live listing, or a
+        different view of the same showing), recording that instead usually works.</span></div>`;
+      return;
+    }
+
     box.innerHTML =
-      '<div class="empty">No JSON responses captured. Some sites render seats on the server — reload the page while recording and make sure the map actually redrew.</div>';
+      '<div class="empty">No JSON responses captured. Some sites build the page on the server, so there\'s no separate data request to watch — reload the page while recording and make sure the seats or listings actually redrew.</div>';
     return;
   }
 

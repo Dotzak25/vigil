@@ -28,6 +28,55 @@
     }
   }
 
+  /* ---------- live-transport detection ---------- */
+
+  /**
+   * VIGIL's whole model is "observe one request, replay that request later".
+   * A WebSocket or an EventSource breaks that model at the root: there is no
+   * request to re-issue, only a connection the server pushes down, and an
+   * MV3 service worker (killed after ~30s idle) cannot hold one open.
+   *
+   * These are NOT hooked to capture data — they're hooked purely to notice
+   * that the page uses one. That distinction matters for honesty: on a
+   * WebSocket-driven seat map VIGIL captures nothing, and it used to explain
+   * that with "some sites render seats on the server", which is the wrong
+   * reason. The user then hunts for a mistake they didn't make. Detecting
+   * the real cause lets the UI say what's actually true.
+   *
+   * High-demand seat maps with live seat-locking — precisely the flagship
+   * use case — are the most likely place to hit this.
+   */
+  function noteLiveTransport(kind, url) {
+    try {
+      window.postMessage(
+        { source: TAG, liveTransport: { kind, url: String(url || ''), at: Date.now() } },
+        window.location.origin,
+      );
+    } catch (_) { /* never surface */ }
+  }
+
+  const OrigWebSocket = window.WebSocket;
+  if (typeof OrigWebSocket === 'function') {
+    const Wrapped = function (url, protocols) {
+      noteLiveTransport('websocket', url);
+      return protocols === undefined ? new OrigWebSocket(url) : new OrigWebSocket(url, protocols);
+    };
+    Wrapped.prototype = OrigWebSocket.prototype;
+    for (const k of ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED']) Wrapped[k] = OrigWebSocket[k];
+    try { window.WebSocket = Wrapped; } catch (_) { /* frozen; detection is optional */ }
+  }
+
+  const OrigEventSource = window.EventSource;
+  if (typeof OrigEventSource === 'function') {
+    const WrappedES = function (url, config) {
+      noteLiveTransport('eventsource', url);
+      return config === undefined ? new OrigEventSource(url) : new OrigEventSource(url, config);
+    };
+    WrappedES.prototype = OrigEventSource.prototype;
+    for (const k of ['CONNECTING', 'OPEN', 'CLOSED']) WrappedES[k] = OrigEventSource[k];
+    try { window.EventSource = WrappedES; } catch (_) { /* frozen; detection is optional */ }
+  }
+
   /* ---------- fetch ---------- */
 
   const origFetch = window.fetch;
