@@ -1,0 +1,445 @@
+<title>The Cancellation Window</title>
+<style>
+  /* ---- tokens: light is the reading state; dark becomes the product's own instrument panel ---- */
+  :root {
+    --ground: #f6f7f8;
+    --surface: #eef0f2;
+    --edge: #d8dce1;
+    --ink: #151a21;
+    --muted: #5d6673;
+    --signal: #a86c0c;
+    --signal-soft: #f0e3cb;
+    --critical: #9c3323;
+    --good: #2f6b4f;
+
+    --display: 800 1em/1.05 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    --body: 1em/1.65 Charter, "Bitstream Charter", "Iowan Old Style", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+
+    --measure: 68ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #12161c;
+      --surface: #1a2029;
+      --edge: #2c3543;
+      --ink: #dce1e8;
+      --muted: #8994a6;
+      --signal: #e8a33d;
+      --signal-soft: #3a2c14;
+      --critical: #e08279;
+      --good: #63bf94;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #12161c;
+    --surface: #1a2029;
+    --edge: #2c3543;
+    --ink: #dce1e8;
+    --muted: #8994a6;
+    --signal: #e8a33d;
+    --signal-soft: #3a2c14;
+    --critical: #e08279;
+    --good: #63bf94;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: var(--body);
+    font-size: 17px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: var(--measure); margin: 0 auto; padding: 72px 24px 120px; }
+
+  /* ---- masthead ---- */
+  .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 44px; }
+  .stamp {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 22px;
+  }
+  .stamp b { color: var(--signal); font-weight: 500; }
+  h1 {
+    font: var(--display); font-size: clamp(34px, 6.5vw, 52px);
+    letter-spacing: -.03em; margin: 0 0 16px; text-wrap: balance;
+  }
+  .standfirst { font-size: 19px; line-height: 1.5; color: var(--muted); margin: 0; text-wrap: pretty; }
+
+  /* ---- section rhythm ---- */
+  section { margin-top: 56px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 12px;
+  }
+  h2 {
+    font: var(--display); font-size: 25px; letter-spacing: -.02em;
+    margin: 0 0 14px; text-wrap: balance;
+  }
+  h3 {
+    font: var(--display); font-size: 17px; letter-spacing: -.01em;
+    margin: 30px 0 8px;
+  }
+  p { margin: 0 0 16px; text-wrap: pretty; }
+  a { color: var(--signal); }
+
+  /* ---- the thesis: the one thing to remember ---- */
+  .thesis {
+    border-left: 3px solid var(--signal);
+    background: var(--signal-soft);
+    padding: 22px 26px; margin: 32px 0;
+    font-size: 20px; line-height: 1.45;
+  }
+  .thesis strong { color: var(--signal); }
+
+  /* ---- the stat that carries the argument ---- */
+  .stat { display: flex; gap: 22px; align-items: baseline; margin: 28px 0; padding: 20px 0; border-block: 1px solid var(--edge); }
+  .stat .fig {
+    font: var(--display); font-size: 46px; letter-spacing: -.03em; color: var(--signal);
+    font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .stat .cap { font-size: 15px; color: var(--muted); line-height: 1.45; }
+
+  /* ---- ledger: findings with a verdict ---- */
+  .ledger { display: flex; flex-direction: column; gap: 2px; margin: 24px 0; }
+  .row {
+    display: grid; grid-template-columns: 96px 1fr; gap: 18px;
+    padding: 16px 0; border-top: 1px solid var(--edge); align-items: start;
+  }
+  .row:last-child { border-bottom: 1px solid var(--edge); }
+  .verdict {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+    padding: 4px 7px; border: 1px solid currentColor; border-radius: 3px;
+    display: inline-block; white-space: nowrap;
+  }
+  .v-open { color: var(--good); }
+  .v-taken { color: var(--critical); }
+  .v-risk { color: var(--signal); }
+  .row .body { font-size: 16px; line-height: 1.55; }
+  .row .body b { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500; margin-bottom: 5px; }
+
+  /* ---- competitor table ---- */
+  .scroller { overflow-x: auto; margin: 22px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; min-width: 460px; }
+  th {
+    text-align: left; font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500;
+    padding: 0 14px 9px 0; border-bottom: 1px solid var(--ink);
+  }
+  td { padding: 12px 14px 12px 0; border-bottom: 1px solid var(--edge); vertical-align: top; line-height: 1.45; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+  .price { font-family: var(--mono); font-size: 13px; color: var(--signal); white-space: nowrap; }
+
+  /* ---- holes: the honest defect list ---- */
+  .hole { border-left: 2px solid var(--critical); padding: 2px 0 2px 18px; margin: 20px 0; }
+  .hole h3 { margin-top: 0; color: var(--critical); }
+  .hole p { margin-bottom: 0; font-size: 16px; }
+
+  /* ---- ranked actions ---- */
+  ol.actions { list-style: none; counter-reset: a; padding: 0; margin: 20px 0; }
+  ol.actions li {
+    counter-increment: a; display: grid; grid-template-columns: 30px 1fr; gap: 16px;
+    padding: 15px 0; border-top: 1px solid var(--edge); align-items: start;
+  }
+  ol.actions li::before {
+    content: counter(a); font-family: var(--mono); font-size: 13px; color: var(--signal);
+    font-variant-numeric: tabular-nums; padding-top: 2px;
+  }
+  ol.actions li:last-child { border-bottom: 1px solid var(--edge); }
+  ol.actions b { display: block; margin-bottom: 3px; }
+  ol.actions span { font-size: 15px; color: var(--muted); line-height: 1.5; }
+
+  .dont { background: var(--surface); border: 1px solid var(--edge); padding: 20px 24px; margin: 24px 0; }
+  .dont h3 { margin-top: 0; }
+  .dont ul { margin: 0; padding-left: 20px; }
+  .dont li { margin-bottom: 10px; font-size: 16px; line-height: 1.5; }
+  .dont li:last-child { margin-bottom: 0; }
+
+  footer {
+    margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--edge);
+    font-family: var(--mono); font-size: 11px; color: var(--muted); line-height: 1.7;
+  }
+
+  @media (max-width: 560px) {
+    .wrap { padding: 44px 18px 80px; }
+    .row { grid-template-columns: 1fr; gap: 8px; }
+    .stat { flex-direction: column; gap: 8px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="stamp">
+      <span>Strategy briefing</span>
+      <span>·</span>
+      <span>VIGIL</span>
+      <span>·</span>
+      <span><b>Read before building anything else</b></span>
+    </div>
+    <h1>The cancellation window</h1>
+    <p class="standfirst">
+      What the market research actually found, where VIGIL genuinely stands, and the holes
+      that matter more than the next feature.
+    </p>
+  </header>
+
+  <section>
+    <p class="eyebrow">The position</p>
+    <h2>Everyone else sells speed. Sell not having to race.</h2>
+    <p>
+      Every competing product in this market runs the same hook: <em>never miss a drop, before it sells
+      out, never overpay.</em> All of them frame the problem the same way — <strong>you were too slow.</strong>
+    </p>
+    <p>
+      Not one frames it as the race itself being the problem. That's the opening, and it happens to be
+      the only claim VIGIL can honestly make: it polls at human rates with jitter and cannot win a
+      millisecond race. What it has isn't speed. It's <em>attention</em> — it's watching at 3am, and you aren't.
+    </p>
+    <div class="thesis">
+      The seat wasn't gone. You just weren't looking at the right second.<br>
+      That was never a “sold out” problem — it's a <strong>timing</strong> problem.
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Why the problem is real</p>
+    <h2>Cancellations cluster exactly where a human can't reach</h2>
+    <p>
+      A competitor published an analysis of 5,600+ tracked seat openings. It is the strongest single
+      piece of evidence for this entire product category:
+    </p>
+    <div class="stat">
+      <div class="fig">11.7h</div>
+      <div class="cap">
+        median lead time between a seat freeing up and the showtime — with 68% inside 24 hours,
+        and roughly one in nine in the final hour before the film starts.
+      </div>
+    </div>
+    <p>
+      That is the whole argument. The seats come back overnight, mid-workday, in the last hour — a
+      distribution no person can cover by refreshing, and one that rewards whoever happens to be
+      looking at that minute.
+    </p>
+    <p>
+      The demand signal is not in doubt elsewhere either: the BFI IMAX sold out all 173 of its 70mm
+      <em>Odyssey</em> screenings, with new batches gone in under 30 minutes against 40,000-deep queues.
+      One solo engineer's seat-watcher reached 5,000+ users in weeks. Another wired up a talking robot
+      to announce openings, because nothing existed that did it. People building robots is what unmet
+      demand looks like.
+    </p>
+  </section>
+
+  <section>
+    <p class="eyebrow">The uncomfortable part</p>
+    <h2>VIGIL is not first, and planning as if it were would be the mistake</h2>
+    <p>
+      This is the finding that most changes the plan. The US cinema seat-alert niche is already
+      occupied — including by a free incumbent.
+    </p>
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr><th>Product</th><th>What it already does</th><th>Price</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>SeatDrop</td>
+            <td>Seat-freed, adjacent-block and new-showtime alerts across AMC, Cinemark and Alamo. Server-side, multi-device, push.</td>
+            <td class="price">Free</td>
+          </tr>
+          <tr>
+            <td>IMAX Tracker</td>
+            <td>70mm specialist. Ticket drops, added showtimes, seat reopenings, adjacency and day/time filters.</td>
+            <td class="price">$24.99/yr</td>
+          </tr>
+          <tr>
+            <td>imaxxing.io</td>
+            <td>70mm nationwide, email alerts, 5,000+ registered users.</td>
+            <td class="price">Free</td>
+          </tr>
+          <tr>
+            <td>PokeNotify</td>
+            <td>Bans bots and auto-checkout <em>by rule</em>. ~25,000 premium members.</td>
+            <td class="price">$7.99/mo</td>
+          </tr>
+          <tr>
+            <td>Hype Hunt</td>
+            <td>Self-describes as “a bot-free sneaker intel platform” — VIGIL's exact positioning, already claimed.</td>
+            <td class="price">Pre-launch</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      So <em>“we watch and never buy”</em> is not a differentiator on its own. What is still unclaimed is
+      making that refusal <strong>architectural and verifiable</strong> — no stored credentials, no cart
+      integration, no checkout step, provable in open source — rather than a policy line in a Discord rulebook.
+    </p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Where the ground is actually open</p>
+    <h2>Four gaps survived scrutiny</h2>
+    <div class="ledger">
+      <div class="row">
+        <span class="verdict v-open">Open</span>
+        <div class="body">
+          <b>Europe — the strongest wedge</b>
+          Every cinema seat-alert tool found is US or Canada only. Zero coverage of Odeon, Cineworld,
+          Vue, Picturehouse, Everyman or BFI IMAX — and there is a literal Odeon App Store review
+          asking for this. VIGIL's catalogue already covers 87 chains across 59 countries, heavily
+          European. Do not open by fighting a free US incumbent on its own ground.
+        </div>
+      </div>
+      <div class="row">
+        <span class="verdict v-open">Open</span>
+        <div class="body">
+          <b>Consumer-side Discord delivery</b>
+          Cook groups charge $30–95/month substantially for the service of delivering alerts into
+          Discord. The only non-broker product found with a Discord webhook targets ticket resellers.
+          Already built here — free, client-fired, no server.
+        </div>
+      </div>
+      <div class="row">
+        <span class="verdict v-open">Open</span>
+        <div class="body">
+          <b>“It's available” fused with “it's worth it”</b>
+          Restock alerting and price/value data live in entirely separate products across every
+          vertical examined. VIGIL already stores rolling price history for its median calculation.
+        </div>
+      </div>
+      <div class="row">
+        <span class="verdict v-risk">Contested</span>
+        <div class="body">
+          <b>The latency band</b>
+          Generic change-detection tools floor at 2 minutes even at $99/mo. Cook groups deliver in
+          60–90 seconds for $75/mo. There is an empty band between them — but competing on latency
+          means competing on the axis VIGIL deliberately refuses to optimise.
+        </div>
+      </div>
+      <div class="row">
+        <span class="verdict v-taken">Taken</span>
+        <div class="body">
+          <b>“Bot-free” as a slogan</b>
+          Claimed already, by more than one competitor. Only the verifiable version is still available.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">The holes</p>
+    <h2>What's actually broken or missing</h2>
+    <p>
+      Ranked by how much they threaten the product, not by how hard they are to fix.
+    </p>
+
+    <div class="hole">
+      <h3>It has never touched a real website</h3>
+      <p>
+        Every test is a fixture written here. The 87-chain catalogue is unverified against live sites.
+        The shared-template folder is empty. Nobody has recorded a single real watch on a single real
+        cinema. Seven audits have now found bugs that only synthetic data could hide — and that will
+        keep being true until it meets one real booking page. <strong>This is the highest-value thing
+        anyone can do next, and it needs a human with a real logged-in session.</strong>
+      </p>
+    </div>
+
+    <div class="hole">
+      <h3>Live seat maps can't be watched at all</h3>
+      <p>
+        High-demand venues with live seat-locking push state over a WebSocket rather than a request —
+        the flagship use case is the most likely place to hit this. There is no request to replay, and
+        a background worker that dies after 30 seconds idle can't hold a connection open. Now at least
+        detected and explained honestly instead of blamed on the wrong cause. A real fix needs the
+        Phase 2 backend.
+      </p>
+    </div>
+
+    <div class="hole">
+      <h3>Anti-bot defences will break it, repeatedly</h3>
+      <p>
+        A competitor is publicly running with its AMC alerts <em>disabled</em> for lack of data. An
+        open-source Ticketmaster monitor is dead from Imperva tokens. This will happen to VIGIL;
+        the question is whether re-recording is fast enough to absorb it.
+      </p>
+    </div>
+
+    <div class="hole">
+      <h3>Basic polling is worth nothing</h3>
+      <p>
+        Maintained open-source Discord monitors for Shopify, SNKRS, Supreme and Footsites are free on
+        GitHub; freelancers build custom ones for ~$30. Defensibility cannot come from “we poll a URL.”
+        It has to come from the catalogue, the shared templates, and the correctness work.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">What to do</p>
+    <h2>Ranked, and honestly scoped</h2>
+    <ol class="actions">
+      <li>
+        <div>
+          <b>Get it onto one real booking page</b>
+          <span>Everything else is speculation until this happens. One European cinema, one real recording, one real alert.</span>
+        </div>
+      </li>
+      <li>
+        <div>
+          <b>Lead with Europe</b>
+          <span>Unserved, documented pain, and the catalogue already covers it.</span>
+        </div>
+      </li>
+      <li>
+        <div>
+          <b>Make the refusal to buy verifiable, not just stated</b>
+          <span>The rhetorical foil writes itself: one competing service has members submit shipping, billing and payment details to a Discord server so staff can check out for them. That's where “just a little automation” ends up.</span>
+        </div>
+      </li>
+      <li>
+        <div>
+          <b>Price-range alerts, and an inline price sparkline</b>
+          <span>Both small. The range rule is the most-copied feature in ticket resale; the sparkline is presentation over data already stored.</span>
+        </div>
+      </li>
+      <li>
+        <div>
+          <b>Format-targeted “new showtime added at this venue”</b>
+          <span>The least-served trigger found anywhere, and technically tractable — several chains expose format as a query parameter.</span>
+        </div>
+      </li>
+    </ol>
+
+    <div class="dont">
+      <h3>Deliberately don't</h3>
+      <ul>
+        <li>
+          <strong>No auto-checkout, in any partial form.</strong> Not pre-filled carts, not “assisted”
+          checkout, not auto-opening the listing. The line is worth more intact than any conversion it buys.
+        </li>
+        <li>
+          <strong>No ML drop-prediction claims.</strong> Unclaimed by everyone credible — possibly
+          because it doesn't work. The search results for it are already polluted with AI-generated
+          fake products; don't join them.
+        </li>
+        <li>
+          <strong>Don't artificially delay free users</strong> to upsell speed, the way one competitor
+          does. And say so.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    Synthesised from competitive research across five adjacent markets — general page-monitoring,
+    ticket and resale trackers, cinema seat alerts, sneaker monitor groups, and collectibles restock
+    services. Vendor marketing claims are treated as claims, not findings. Full detail in STRATEGY.md.
+  </footer>
+
+</div>
